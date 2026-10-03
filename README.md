@@ -42,6 +42,26 @@ mic PCM (8 kHz) -> Codec 2 encode -> packed bits -> Codec 2 decode -> speaker
 
 Backlight convention: **Green = RX, Yellow = TX, Red = Inhibit/Busy**.
 
+## Keypad operation (no touch screen)
+
+Designed to run on keypad-only PoC/HT devices (e.g. Hytera PNC380) with no
+touchscreen. Handled globally in `MainActivity.dispatchKeyEvent`, so the arrow
+keys always drive the radio regardless of focus:
+
+| Key | Action |
+|---|---|
+| Side PTT (228/288/301, `MEDIA_RECORD`, headset hook) | Request floor / talk (hold) |
+| `DPAD UP` / `DPAD DOWN` | Previous / next channel |
+| `DPAD LEFT` / `DPAD RIGHT` | Move soft-key highlight (`Chan` / `Scan` / `Cnts`) |
+| `DPAD CENTER` / `ENTER` | Activate highlighted soft key |
+| `SOFT_LEFT` / `SOFT_RIGHT` | `Chan` / `Cnts` |
+| `MENU` | Options (bitrate, busy, replay RX, add channel, sign out) |
+
+Login uses standard focus navigation (D-pad moves between Username / Password /
+Unit ID / Sign In / Sign Up; typing goes to the focused field). Add Channel
+accepts a full code (`P25-CH-8891`) or, on numeric keypads, just the digits
+(`8891` → `P25-CH-8891`).
+
 ## Building
 
 Requirements: Android Studio (or CLI) with **Android SDK 34** and **NDK

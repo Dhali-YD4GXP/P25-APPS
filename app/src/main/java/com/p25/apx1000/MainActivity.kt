@@ -44,6 +44,7 @@ class MainActivity : AppCompatActivity(), PttService.UiListener {
     private var scanEnabled = false
     private var busy = false
     private var online = false
+    private var softkeyIndex = 0
 
     private var codecMode = Codec2.MODE_1600
 
@@ -219,8 +220,11 @@ class MainActivity : AppCompatActivity(), PttService.UiListener {
         val input = EditText(this).apply {
             hint = getString(R.string.add_channel_hint)
             setPadding(48, 32, 48, 32)
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or
+                android.text.InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS
+            isSingleLine = true
         }
-        AlertDialog.Builder(this)
+        val dialog = AlertDialog.Builder(this)
             .setTitle(R.string.add_channel_title)
             .setView(input)
             .setPositiveButton(R.string.add_channel_ok) { _, _ ->
@@ -233,7 +237,10 @@ class MainActivity : AppCompatActivity(), PttService.UiListener {
                 Toast.makeText(this, "Added ${channel.name}", Toast.LENGTH_SHORT).show()
             }
             .setNegativeButton(R.string.cancel, null)
-            .show()
+            .create()
+        // Keypad-only devices: type straight into the field, D-pad reaches OK/Cancel.
+        dialog.setOnShowListener { input.requestFocus() }
+        dialog.show()
     }
 
     private fun showModeDialog() {
@@ -255,7 +262,7 @@ class MainActivity : AppCompatActivity(), PttService.UiListener {
         val channel = channels.getOrNull(channelIndex) ?: return
         binding.radioDisplay.zone = channel.zone
         binding.radioDisplay.channel = channel.name
-        binding.radioDisplay.softkeyHighlight = if (scanEnabled) 1 else -1
+        binding.radioDisplay.softkeyHighlight = softkeyIndex
         pushChannelToService()
         updateFooter()
     }
@@ -266,10 +273,30 @@ class MainActivity : AppCompatActivity(), PttService.UiListener {
         service?.setChannel(unitId, channel.code)
     }
 
-    private fun cycleChannel() {
+    private fun cycleChannel(delta: Int = 1) {
         if (channels.isEmpty()) return
-        channelIndex = (channelIndex + 1) % channels.size
+        channelIndex = ((channelIndex + delta) % channels.size + channels.size) % channels.size
         applyChannel()
+    }
+
+    /** Move the soft-key highlight with LEFT/RIGHT (keypad only devices). */
+    private fun moveSoftkey(delta: Int) {
+        softkeyIndex = ((softkeyIndex + delta) % SOFTKEY_COUNT + SOFTKEY_COUNT) % SOFTKEY_COUNT
+        binding.radioDisplay.softkeyHighlight = softkeyIndex
+        updateFooter()
+    }
+
+    /** Activate the highlighted soft key (CENTER/ENTER or the left/right soft keys). */
+    private fun activateSoftkey(index: Int) {
+        when (index) {
+            0 -> cycleChannel(1) // Chan: next channel
+            1 -> {               // Scan: toggle scan
+                scanEnabled = !scanEnabled
+                Toast.makeText(this, if (scanEnabled) "Scan ON" else "Scan OFF", Toast.LENGTH_SHORT).show()
+                updateFooter()
+            }
+            2 -> showAddChannelDialog() // Cnts: add channel / contacts
+        }
     }
 
     private fun updateFooter() {
@@ -325,26 +352,67 @@ class MainActivity : AppCompatActivity(), PttService.UiListener {
         updateFooter()
     }
 
-    // ---- Hardware keys --------------------------------------------------
+    // ---- Hardware keys (works with no touch screen) ---------------------
 
-    override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
-        if (PttService.isPttKey(keyCode)) {
-            if (event != null) service?.handleKeyEvent(event)
+    /**
+     * Global key handling so arrow keys drive the radio on keypad-only HT
+     * devices (e.g. Hytera PNC380 / PoC radios) regardless of focus.
+     */
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (PttService.isPttKey(event.keyCode)) {
+            service?.handleKeyEvent(event)
             return true
         }
-        if (keyCode == KeyEvent.KEYCODE_DPAD_CENTER || keyCode == KeyEvent.KEYCODE_ENTER) {
-            cycleChannel()
+        if (binding.radioContainer.visibility == View.VISIBLE && handleRadioKey(event)) {
             return true
         }
-        return super.onKeyDown(keyCode, event)
+        return super.dispatchKeyEvent(event)
     }
 
-    override fun onKeyUp(keyCode: Int, event: KeyEvent?): Boolean {
-        if (PttService.isPttKey(keyCode)) {
-            if (event != null) service?.handleKeyEvent(event)
-            return true
+    private fun handleRadioKey(event: KeyEvent): Boolean {
+        val down = event.action == KeyEvent.ACTION_DOWN
+        when (event.keyCode) {
+            KeyEvent.KEYCODE_DPAD_UP -> if (down) cycleChannel(-1)
+            KeyEvent.KEYCODE_DPAD_DOWN -> if (down) cycleChannel(1)
+            KeyEvent.KEYCODE_DPAD_LEFT -> if (down) moveSoftkey(-1)
+            KeyEvent.KEYCODE_DPAD_RIGHT -> if (down) moveSoftkey(1)
+            KeyEvent.KEYCODE_DPAD_CENTER,
+            KeyEvent.KEYCODE_ENTER,
+            KeyEvent.KEYCODE_NUMPAD_ENTER -> if (down) activateSoftkey(softkeyIndex)
+            KeyEvent.KEYCODE_SOFT_LEFT -> if (down) activateSoftkey(0)
+            KeyEvent.KEYCODE_SOFT_RIGHT -> if (down) activateSoftkey(2)
+            KeyEvent.KEYCODE_MENU -> if (down) showOptionsDialog()
+            else -> return false
         }
-        return super.onKeyUp(keyCode, event)
+        return true
+    }
+
+    private fun showOptionsDialog() {
+        val items = arrayOf(
+            "Codec 2 bitrate",
+            "Toggle channel busy",
+            "Replay last RX",
+            "Add channel",
+            "Sign out"
+        )
+        AlertDialog.Builder(this)
+            .setTitle("Options")
+            .setItems(items) { _, which ->
+                when (which) {
+                    0 -> showModeDialog()
+                    1 -> {
+                        busy = !busy
+                        service?.setChannelBusy(busy)
+                    }
+                    2 -> service?.replayRx(REMOTE_ID)
+                    3 -> showAddChannelDialog()
+                    4 -> {
+                        store.signOut()
+                        showLogin()
+                    }
+                }
+            }
+            .show()
     }
 
     // ---- Signal / battery ----------------------------------------------
@@ -436,5 +504,6 @@ class MainActivity : AppCompatActivity(), PttService.UiListener {
     companion object {
         private const val REQ_PERMISSIONS = 1001
         private const val REMOTE_ID = "1002"
+        private const val SOFTKEY_COUNT = 3
     }
 }
