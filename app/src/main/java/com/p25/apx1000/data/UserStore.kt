@@ -71,6 +71,11 @@ class UserStore(context: Context) {
         get() = prefs.getInt(KEY_PTT, -1)
         set(v) = prefs.edit().putInt(KEY_PTT, v).apply()
 
+    /** Layout override: 0 = auto, 1 = phone (touch PTT), 2 = PoC (keypad). */
+    var layoutMode: Int
+        get() = prefs.getInt(KEY_LAYOUT, 0)
+        set(v) = prefs.edit().putInt(KEY_LAYOUT, v).apply()
+
     fun signOut() = prefs.edit().remove(KEY_SESSION_USER).remove(KEY_SESSION_UID).apply()
 
     private fun accounts(): List<Account> {
@@ -137,5 +142,6 @@ class UserStore(context: Context) {
         private const val KEY_SESSION_USER = "session_user"
         private const val KEY_SESSION_UID = "session_uid"
         private const val KEY_PTT = "ptt_keycode"
+        private const val KEY_LAYOUT = "layout_mode"
     }
 }

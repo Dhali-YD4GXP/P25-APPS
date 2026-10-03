@@ -166,6 +166,8 @@ class PttService : Service(), PttEngine.Listener {
 
     fun isOnline(): Boolean = signaling?.isConnected == true
 
+    fun txFrames(): Int = engine?.txFrames ?: 0
+
     fun replayRx(unitId: String?) = engine?.replayRx(unitId)
 
     fun setCodecMode(mode: Int) = engine?.start(mode)

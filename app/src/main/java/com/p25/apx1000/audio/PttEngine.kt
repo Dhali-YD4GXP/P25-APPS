@@ -59,6 +59,10 @@ class PttEngine(context: Context, private val listener: Listener) {
     @Volatile private var channelBusy = false
     @Volatile private var visible = false
 
+    /** Number of TX frames encoded during the current/last transmission. */
+    @Volatile var txFrames: Int = 0
+        private set
+
     /** Transport hook: called for every encoded TX frame. */
     @Volatile var onFrameEncoded: ((ByteArray) -> Unit)? = null
 
@@ -104,7 +108,7 @@ class PttEngine(context: Context, private val listener: Listener) {
                 val recBuf = maxOf(minRec, frameBytes * 4)
                 @Suppress("DEPRECATION")
                 audioRecord = AudioRecord(
-                    MediaRecorder.AudioSource.VOICE_COMMUNICATION,
+                    MediaRecorder.AudioSource.MIC,
                     SAMPLE_RATE,
                     AudioFormat.CHANNEL_IN_MONO,
                     AudioFormat.ENCODING_PCM_16BIT,
@@ -143,6 +147,7 @@ class PttEngine(context: Context, private val listener: Listener) {
         if (capturing) return
         handler.removeCallbacks(rxTimeout)
         rxPlaying = false
+        txFrames = 0
         listener.onSpeaker(null)
         capturing = true
         setLight(Light.TX)
@@ -214,6 +219,7 @@ class PttEngine(context: Context, private val listener: Listener) {
             val n = rec.read(buf, 0, frame)
             if (n <= 0) continue
             val bits = enc.encode(buf)
+            txFrames++
             synchronized(lastTxFrames) {
                 if (lastTxFrames.size >= MAX_STORED_FRAMES) lastTxFrames.removeAt(0)
                 lastTxFrames.add(bits.copyOf())
@@ -320,7 +326,12 @@ class PttEngine(context: Context, private val listener: Listener) {
 
     private fun writePlayback(pcm: ShortArray) {
         synchronized(playLock) {
-            audioTrack?.write(pcm, 0, pcm.size)
+            val track = audioTrack ?: return
+            try {
+                if (track.playState != AudioTrack.PLAYSTATE_PLAYING) track.play()
+            } catch (_: Throwable) {
+            }
+            track.write(pcm, 0, pcm.size)
         }
     }
 

@@ -68,7 +68,8 @@ class MainActivity : AppCompatActivity(), PttService.UiListener {
     private val signalPoll = object : Runnable {
         override fun run() {
             updateSignalAndNetwork()
-            handler.postDelayed(this, 2500)
+            updateStatus()
+            handler.postDelayed(this, 1000)
         }
     }
 
@@ -225,7 +226,11 @@ class MainActivity : AppCompatActivity(), PttService.UiListener {
     private fun applyResponsiveLayout() {
         val touch = packageManager.hasSystemFeature(PackageManager.FEATURE_TOUCHSCREEN)
         val smallestDp = resources.configuration.smallestScreenWidthDp
-        val showPad = touch && smallestDp >= 320
+        val showPad = when (store.layoutMode) {
+            1 -> true               // forced phone
+            2 -> false              // forced PoC/keypad
+            else -> touch && smallestDp >= 320
+        }
         binding.pttPadWrap.visibility = if (showPad) View.VISIBLE else View.GONE
     }
 
@@ -404,7 +409,8 @@ class MainActivity : AppCompatActivity(), PttService.UiListener {
     }
 
     private fun updateStatus() {
-        binding.radioDisplay.statusText = if (busy) "BUSY" else connDetail
+        val tx = service?.txFrames() ?: 0
+        binding.radioDisplay.statusText = if (busy) "TX $tx" else connDetail
     }
 
     // ---- Self-test (independent of the PTT service) ---------------------
@@ -510,6 +516,7 @@ class MainActivity : AppCompatActivity(), PttService.UiListener {
             "Self-test",
             "Reconnect",
             "Learn side PTT key",
+            "Toggle phone / PoC layout",
             "Codec 2 bitrate",
             "Toggle channel busy",
             "Replay last RX",
@@ -531,14 +538,23 @@ class MainActivity : AppCompatActivity(), PttService.UiListener {
                         learningPtt = true
                         Toast.makeText(this, "Press the side PTT key now…", Toast.LENGTH_LONG).show()
                     }
-                    3 -> showModeDialog()
-                    4 -> {
+                    3 -> {
+                        store.layoutMode = if (store.layoutMode == 2) 1 else 2
+                        applyResponsiveLayout()
+                        Toast.makeText(
+                            this,
+                            if (store.layoutMode == 2) "PoC/keypad layout" else "Phone layout",
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    }
+                    4 -> showModeDialog()
+                    5 -> {
                         busy = !busy
                         service?.setChannelBusy(busy)
                     }
-                    5 -> service?.replayRx(REMOTE_ID)
-                    6 -> showAddChannelDialog()
-                    7 -> logout()
+                    6 -> service?.replayRx(REMOTE_ID)
+                    7 -> showAddChannelDialog()
+                    8 -> logout()
                 }
             }
             .show()
