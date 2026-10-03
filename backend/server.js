@@ -16,6 +16,7 @@
 
 const http = require('http');
 const crypto = require('crypto');
+const fs = require('fs');
 const express = require('express');
 const { WebSocketServer } = require('ws');
 
@@ -27,9 +28,11 @@ const HOST = process.env.HOST || '0.0.0.0';
 // ---------------------------------------------------------------------------
 const accounts = new Map(); // username(lower) -> { username, unitId, salt, hash }
 const unitIds = new Map();  // unitId(upper)    -> username(lower)
-const channels = new Map(); // code(upper)      -> { name, code, zone }
+const channels = new Map(); // code(upper)      -> { name, code, zone, alias, secure, allowedIds }
+const activity = [];        // completed TX: { unitId, username, channel, start, end, durationMs }
+const activeTx = new Map(); // channel -> { unitId, username, start }
 
-channels.set('P25-CH-1000', { name: 'APX-1000', code: 'P25-CH-1000', zone: 'ZONE 1' });
+channels.set('P25-CH-1000', { name: 'P25', code: 'P25-CH-1000', zone: 'ZONE 1', alias: null, secure: false, allowedIds: new Set() });
 
 function hashPassword(password, salt) {
   return crypto.createHash('sha256').update(salt + ':' + password).digest('hex');
@@ -108,19 +111,84 @@ app.post('/api/auth/login', (req, res) => {
   res.json({ username: account.username, unitId: account.unitId });
 });
 
+function channelJson(c) {
+  return {
+    name: c.name, code: c.code, zone: c.zone,
+    alias: c.alias || null, secure: !!c.secure,
+    allowedIds: [...(c.allowedIds || [])],
+  };
+}
+
 app.get('/api/channels', (req, res) => {
-  res.json({ channels: [...channels.values()] });
+  res.json({ channels: [...channels.values()].map(channelJson) });
 });
 
+// Add a channel. Generates a unique code when a name is given; admin may set
+// an alias (shown on the radio UI) and mark it secure with an ID allowlist.
 app.post('/api/channels', (req, res) => {
   const raw = String((req.body && req.body.nameOrCode) || '').trim();
   if (!raw) return res.status(400).json({ error: 'nameOrCode is required' });
   const isCode = /^P25-CH-\d{3,6}$/i.test(raw);
-  const code = isCode ? raw.toUpperCase() : 'TG-' + crypto.createHash('sha1').update(raw.toLowerCase()).digest('hex').slice(0, 8);
-  if (!channels.has(code)) {
-    channels.set(code, { name: isCode ? code : raw, code, zone: 'ZONE 1' });
+  let code = isCode ? raw.toUpperCase() : 'P25-CH-' + crypto.randomInt(1000, 9999);
+  while (channels.has(code)) code = 'P25-CH-' + crypto.randomInt(1000, 9999);
+  const ch = {
+    name: isCode ? code : raw,
+    code,
+    zone: 'ZONE 1',
+    alias: (req.body && req.body.alias) ? String(req.body.alias).trim() : null,
+    secure: !!(req.body && req.body.secure),
+    allowedIds: new Set(Array.isArray(req.body && req.body.allowedIds)
+      ? req.body.allowedIds.map((s) => String(s).trim().toUpperCase()).filter(Boolean)
+      : []),
+  };
+  channels.set(code, ch);
+  if (!floors.has(code)) floors.set(code, { holder: null });
+  console.log('[ch] added', code, 'alias=', ch.alias, 'secure=', ch.secure);
+  res.status(201).json(channelJson(ch));
+});
+
+app.post('/api/channels/:code', (req, res) => {
+  const code = String(req.params.code).toUpperCase();
+  const ch = channels.get(code);
+  if (!ch) return res.status(404).json({ error: 'channel not found' });
+  if (req.body && req.body.alias !== undefined) ch.alias = req.body.alias ? String(req.body.alias).trim() : null;
+  if (req.body && req.body.secure !== undefined) ch.secure = !!req.body.secure;
+  if (req.body && req.body.allowedIds !== undefined) {
+    ch.allowedIds = new Set(Array.isArray(req.body.allowedIds)
+      ? req.body.allowedIds.map((s) => String(s).trim().toUpperCase()).filter(Boolean) : []);
   }
-  res.status(201).json(channels.get(code));
+  res.json(channelJson(ch));
+});
+
+app.delete('/api/channels/:code', (req, res) => {
+  const code = String(req.params.code).toUpperCase();
+  if (!channels.delete(code)) return res.status(404).json({ error: 'channel not found' });
+  floors.delete(code);
+  console.log('[ch] deleted', code);
+  res.json({ ok: true });
+});
+
+// OTA version manifest (written by the Gradle build into /srv/apk/version.json).
+app.get('/api/version', (req, res) => {
+  try {
+    const v = JSON.parse(fs.readFileSync('/srv/apk/version.json', 'utf8'));
+    v.apkUrl = v.apkUrl || '/p25.apk';
+    res.json(v);
+  } catch {
+    res.json({ versionCode: 0, versionName: '0', apkUrl: '/p25.apk' });
+  }
+});
+
+// Channel TX activity for the admin terminal.
+app.get('/api/activity', (req, res) => {
+  res.json({
+    active: [...activeTx.values()],
+    history: activity.slice(0, 100),
+  });
+});
+
+app.get('/admin', (req, res) => {
+  res.sendFile(require('path').join(__dirname, 'admin.html'));
 });
 
 // ---------------------------------------------------------------------------
@@ -208,6 +276,7 @@ wss.on('connection', (ws, req) => {
     const floor = floors.get(channel);
     if (floor && floor.holder === unitId) {
       floor.holder = null;
+      recordTx(channel);
       broadcast(channel, { type: 'floor', busy: false, holder: null, reason: 'released' });
     }
     broadcast(channel, { type: 'member', action: 'leave', unitId }, ws);
@@ -222,9 +291,22 @@ function onHello(ws, msg) {
   const unitId = String(msg.unitId || '').trim().toUpperCase();
   if (!unitId) return send(ws, { type: 'error', message: 'unitId required' });
   ws.meta.unitId = unitId;
-  console.log('[ws] hello', unitId);
+  ws.meta.username = msg.username ? String(msg.username).trim() : null;
+  console.log('[ws] hello', unitId, ws.meta.username || '');
   send(ws, { type: 'welcome', unitId, server: 'p25-apx1000' });
   if (msg.channel) onJoin(ws, { channel: msg.channel });
+}
+
+function usernameFor(ws) {
+  return ws.meta.username || unitIds.get(ws.meta.unitId) || ws.meta.unitId;
+}
+
+function recordTx(channel) {
+  const t = activeTx.get(channel);
+  if (!t) return;
+  activeTx.delete(channel);
+  activity.unshift({ unitId: t.unitId, username: t.username, channel, start: t.start, end: Date.now(), durationMs: Date.now() - t.start });
+  if (activity.length > 200) activity.length = 200;
 }
 
 function onJoin(ws, msg) {
@@ -232,18 +314,25 @@ function onJoin(ws, msg) {
   if (!ws.meta.unitId) return send(ws, { type: 'error', message: 'send hello first' });
   if (!code) return send(ws, { type: 'error', message: 'channel required' });
 
+  // Secured channel: only allow-listed IDs may join.
+  const existing = channels.get(code);
+  if (existing && existing.secure && !(existing.allowedIds || new Set()).has(ws.meta.unitId)) {
+    console.log('[ws] join denied', ws.meta.unitId, code, '(secure)');
+    return send(ws, { type: 'error', message: 'channel secured, ID not authorized' });
+  }
+
   // leave previous channel
   if (ws.meta.channel && ws.meta.channel !== code) {
     broadcast(ws.meta.channel, { type: 'member', action: 'leave', unitId: ws.meta.unitId }, ws);
   }
   ws.meta.channel = code;
   if (!floors.has(code)) floors.set(code, { holder: null });
-  if (!channels.has(code)) channels.set(code, { name: code, code, zone: 'ZONE 1' });
+  if (!channels.has(code)) channels.set(code, { name: code, code, zone: 'ZONE 1', alias: null, secure: false, allowedIds: new Set() });
   console.log('[ws] join', ws.meta.unitId, code);
 
   send(ws, {
     type: 'joined',
-    channel: channels.get(code),
+    channel: channelJson(channels.get(code)),
     members: membersOf(code).map((c) => c.meta.unitId),
     floor: floors.get(code).holder,
   });
@@ -263,6 +352,7 @@ function onPtt(ws, msg) {
       return send(ws, { type: 'floor', busy: true, holder: floor.holder, reason: 'occupied', granted: false });
     }
     floor.holder = unitId;
+    activeTx.set(channel, { unitId, username: usernameFor(ws), start: Date.now() });
     console.log('[ws] ptt granted', unitId, channel);
     broadcast(channel, { type: 'floor', busy: true, holder: unitId, reason: 'granted', granted: true });
     broadcast(channel, { type: 'speaker', unitId }, ws);
@@ -272,6 +362,7 @@ function onPtt(ws, msg) {
   // state === 'up'
   if (floor.holder === unitId) {
     floor.holder = null;
+    recordTx(channel);
     console.log('[ws] ptt released', unitId, channel);
     broadcast(channel, { type: 'floor', busy: false, holder: null, reason: 'released' });
   }

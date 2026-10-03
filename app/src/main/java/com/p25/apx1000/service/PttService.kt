@@ -40,6 +40,7 @@ class PttService : Service(), PttEngine.Listener {
         fun onBusy(busy: Boolean)
         fun onError(message: String)
         fun onConnection(connected: Boolean, detail: String)
+        fun onAlias(alias: String?)
     }
 
     inner class LocalBinder : Binder() {
@@ -156,7 +157,7 @@ class PttService : Service(), PttEngine.Listener {
     }
 
     /** Point the radio at a talkgroup and (re)connect signaling. */
-    fun setChannel(unitId: String, code: String) {
+    fun setChannel(unitId: String, username: String, code: String) {
         val id = unitId.trim().uppercase()
         val ch = code.trim().uppercase()
         ensureSignaling()
@@ -167,7 +168,7 @@ class PttService : Service(), PttEngine.Listener {
             signaling?.join(ch)
         } else {
             channelCode = ch
-            signaling?.connect(id, ch)
+            signaling?.connect(id, username, ch)
         }
     }
 
@@ -215,8 +216,9 @@ class PttService : Service(), PttEngine.Listener {
             postToUi { it.onConnection(false, "OFF ${reason.take(40)}") }
         }
 
-        override fun onJoined(channelName: String) {
-            postToUi { it.onConnection(true, channelName) }
+        override fun onJoined(channelName: String, alias: String?, floorHolder: String?) {
+            postToUi { it.onAlias(alias) }
+            setChannelBusy(!floorHolder.isNullOrEmpty())
         }
 
         override fun onFloor(busy: Boolean, holder: String?, granted: Boolean) {

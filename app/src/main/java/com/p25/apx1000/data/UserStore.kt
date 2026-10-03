@@ -100,11 +100,12 @@ class UserStore(context: Context) {
 
     fun channels(): List<Channel> {
         val raw = prefs.getString(KEY_CHANNELS, null)
-            ?: return listOf(Channel(name = "P25", code = "P25-CH-1000", zone = "ZONE 1"))
+            ?: return listOf(Channel(name = "P25", code = "P25-CH-1000", zone = 1))
         val arr = JSONArray(raw)
         return (0 until arr.length()).map { i ->
             val o = arr.getJSONObject(i)
-            Channel(o.getString("n"), o.getString("c"), o.optString("z", "ZONE 1"))
+            val alias = o.optString("a").ifEmpty { null }
+            Channel(o.getString("n"), o.getString("c"), o.optInt("z", 1), alias)
         }.map {
             // one-time rebrand of the previous default name
             if (it.name.equals("APX-1000", ignoreCase = true)) it.copy(name = "P25") else it
@@ -122,10 +123,21 @@ class UserStore(context: Context) {
         return channel
     }
 
+    /** Number of zones the operator wants (1..9). */
+    var zoneCount: Int
+        get() = prefs.getInt(KEY_ZONECOUNT, 1).coerceIn(1, 9)
+        set(v) = prefs.edit().putInt(KEY_ZONECOUNT, v.coerceIn(1, 9)).apply()
+
+    /** Assign a channel to a zone (1-based). */
+    fun setChannelZone(code: String, zone: Int) {
+        val list = channels().map { if (it.code.equals(code, ignoreCase = true)) it.copy(zone = zone.coerceIn(1, zoneCount)) else it }
+        persistChannels(list)
+    }
+
     private fun persistChannels(list: List<Channel>) {
         val arr = JSONArray()
         list.forEach {
-            arr.put(JSONObject().put("n", it.name).put("c", it.code).put("z", it.zone))
+            arr.put(JSONObject().put("n", it.name).put("c", it.code).put("z", it.zone).put("a", it.alias ?: ""))
         }
         prefs.edit().putString(KEY_CHANNELS, arr.toString()).apply()
     }
@@ -144,5 +156,6 @@ class UserStore(context: Context) {
         private const val KEY_SESSION_UID = "session_uid"
         private const val KEY_PTT = "ptt_keycode"
         private const val KEY_LAYOUT = "layout_mode"
+        private const val KEY_ZONECOUNT = "zone_count"
     }
 }

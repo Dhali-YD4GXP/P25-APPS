@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>P25 Admin Terminal</title>
+<style>
+  body{font-family:system-ui,sans-serif;background:#0b0e10;color:#e8e8e8;margin:0;padding:16px}
+  h1{font-size:18px;color:#ffb000}
+  h2{font-size:14px;color:#ffb000;margin-top:20px}
+  table{border-collapse:collapse;width:100%;font-size:13px}
+  th,td{border:1px solid #333;padding:6px 8px;text-align:left}
+  th{background:#161a1d}
+  .txing{color:#39ff6a;font-weight:bold}
+  input,button{background:#161a1d;color:#e8e8e8;border:1px solid #444;padding:6px 8px;margin:2px 0;border-radius:4px}
+  button{background:#2a6b2f;border:none;cursor:pointer}
+  button.del{background:#8a2f2a}
+  .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  code{color:#ffb000}
+</style>
+</head>
+<body>
+<h1>P25 Admin Terminal</h1>
+<div id="ver"></div>
+
+<h2>Live Channel Activity</h2>
+<table id="act">
+  <thead><tr><th>ID</th><th>Username</th><th>Channel</th><th>Mulai</th><th>Durasi</th></tr></thead>
+  <tbody></tbody>
+</table>
+
+<h2>Channels</h2>
+<table id="ch">
+  <thead><tr><th>Code</th><th>Alias</th><th>Secure</th><th>Allowed IDs</th><th></th></tr></thead>
+  <tbody></tbody>
+</table>
+
+<h2>Add Channel</h2>
+<div class="row">
+  <input id="f_name" placeholder="Name or code (e.g. P25-CH-8891)">
+  <input id="f_alias" placeholder="Alias (tampil di layar)">
+  <label><input type="checkbox" id="f_secure"> Secure</label>
+  <input id="f_ids" placeholder="Allowed IDs (koma, utk secure)">
+  <button onclick="addChannel()">Add</button>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+async function j(url, opts){ const r = await fetch(url, opts); return r.json(); }
+
+async function refresh(){
+  try{
+    const v = await j('/api/version');
+    $('ver').innerHTML = 'Server version: <code>'+v.versionName+'</code> (code '+v.versionCode+') · APK: <a style="color:#39ff6a" href="'+v.apkUrl+'">'+v.apkUrl+'</a>';
+  }catch(e){}
+  try{
+    const a = await j('/api/activity');
+    const tb = $('act').tBodies[0];
+    tb.innerHTML = '';
+    const rows = (a.active||[]).map(x=>[x.unitId,x.username,x.channel,new Date(x.start).toLocaleTimeString(),'<span class="txing">TXING</span>'])
+      .concat((a.history||[]).map(x=>[x.unitId,x.username,x.channel,new Date(x.start).toLocaleTimeString(),ms(x.durationMs)]));
+    rows.forEach(r=>{ const tr=tb.insertRow(); r.forEach(c=>{const td=tr.insertCell(); td.innerHTML=c;}); });
+  }catch(e){}
+  try{
+    const c = await j('/api/channels');
+    const tb = $('ch').tBodies[0]; tb.innerHTML='';
+    c.channels.forEach(ch=>{
+      const tr=tb.insertRow();
+      const cells=[ch.code, ch.alias||'-', ch.secure?'YA':'-', (ch.allowedIds||[]).join(', '), ''];
+      cells.forEach(x=>{const td=tr.insertCell(); td.textContent=x;});
+      const td=tr.cells[4];
+      td.innerHTML='<button class="del" onclick="delChannel(\''+ch.code+'\')">Hapus</button>';
+    });
+  }catch(e){}
+}
+
+function ms(d){ if(d==null) return ''; const s=Math.round(d/1000); return s>=60 ? Math.floor(s/60)+'m'+s%60+'s' : s+'s'; }
+
+async function addChannel(){
+  const body = { nameOrCode: $('f_name').value.trim() };
+  const alias = $('f_alias').value.trim(); if(alias) body.alias = alias;
+  body.secure = $('f_secure').checked;
+  if(body.secure){ body.allowedIds = $('f_ids').value.split(',').map(s=>s.trim().toUpperCase()).filter(Boolean); }
+  if(!body.nameOrCode){ alert('isi name/code'); return; }
+  await j('/api/channels', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+  refresh();
+}
+
+async function delChannel(code){
+  await j('/api/channels/'+encodeURIComponent(code), {method:'DELETE'});
+  refresh();
+}
+
+refresh();
+setInterval(refresh, 1000);
+</script>
+</body>
+</html>

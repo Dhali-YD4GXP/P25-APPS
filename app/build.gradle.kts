@@ -12,8 +12,8 @@ android {
         applicationId = "com.p25.apx1000"
         minSdk = 21
         targetSdk = 34
-        versionCode = 14
-        versionName = "2.2"
+        versionCode = 15
+        versionName = "2.3"
 
         externalNativeBuild {
             cmake {
@@ -70,4 +70,22 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-service:2.8.4")
     implementation("androidx.media:media:1.7.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+}
+
+// Write an OTA version manifest next to the APK so the backend can serve it
+// at /api/version (the build dir is mounted into the backend container).
+tasks.register("writeVersionJson") {
+    doLast {
+        val ext = project.extensions.getByName("android") as com.android.build.gradle.BaseExtension
+        val code = ext.defaultConfig.versionCode
+        val name = ext.defaultConfig.versionName
+        val dir = file("build/outputs/apk/debug")
+        dir.mkdirs()
+        dir.resolve("version.json").writeText(
+            "{\"versionCode\":$code,\"versionName\":\"$name\",\"apkUrl\":\"/p25.apk\"}"
+        )
+    }
+}
+tasks.whenTaskAdded {
+    if (name == "assembleDebug") finalizedBy("writeVersionJson")
 }

@@ -4,12 +4,10 @@ package com.p25.apx1000.data
 data class Channel(
     val name: String,
     val code: String,
-    val zone: String = "ZONE 1"
+    val zone: Int = 1,
+    val alias: String? = null
 ) {
-    val displayName: String get() = name
-
-    /** True when the user typed a unique channel code rather than a name. */
-    val isCodeEntry: Boolean get() = code.equals(name, ignoreCase = true)
+    val displayName: String get() = alias ?: name
 
     companion object {
         /** Codes look like "P25-CH-8891". */

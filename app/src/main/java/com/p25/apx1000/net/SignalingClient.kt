@@ -36,7 +36,7 @@ class SignalingClient(
         fun onConnecting()
         fun onConnected()
         fun onDisconnected(reason: String)
-        fun onJoined(channelName: String)
+        fun onJoined(channelName: String, alias: String?, floorHolder: String?)
         fun onFloor(busy: Boolean, holder: String?, granted: Boolean)
         fun onSpeaker(unitId: String?)
         fun onRemoteFrame(frame: ByteArray)
@@ -49,6 +49,7 @@ class SignalingClient(
 
     @Volatile private var wantConnected = false
     @Volatile private var unitId: String = ""
+    @Volatile private var username: String = ""
     @Volatile private var channel: String = ""
 
     private val handler = Handler(Looper.getMainLooper())
@@ -64,10 +65,11 @@ class SignalingClient(
     private val retry = Runnable { if (wantConnected) openSocket() }
 
     /** Connect (or reconnect) with the given identity and optional channel. */
-    fun connect(unitId: String, channel: String) {
+    fun connect(unitId: String, username: String, channel: String) {
         val newId = unitId.trim().uppercase()
         val idChanged = newId != this.unitId
         this.unitId = newId
+        this.username = username.trim()
         this.channel = channel.trim().uppercase()
         wantConnected = true
         retryDelayMs = 2000L
@@ -84,8 +86,12 @@ class SignalingClient(
         if (webSocket == null) {
             openSocket()
         } else if (isConnected) {
-            send(JSONObject().put("type", "hello").put("unitId", this.unitId).put("channel", this.channel))
+            sendHello()
         }
+    }
+
+    private fun sendHello() {
+        send(JSONObject().put("type", "hello").put("unitId", unitId).put("username", username).put("channel", channel))
     }
 
     /** Join (or switch) a talkgroup channel on the current connection. */
@@ -154,7 +160,7 @@ class SignalingClient(
             isConnected = true
             retryDelayMs = 2000L
             listener.onConnected()
-            send(JSONObject().put("type", "hello").put("unitId", unitId).put("channel", channel))
+            sendHello()
         }
 
         override fun onMessage(ws: WebSocket, text: String) {
@@ -162,7 +168,14 @@ class SignalingClient(
                 val obj = JSONObject(text)
                 when (obj.optString("type")) {
                     "welcome" -> {}
-                    "joined" -> listener.onJoined(obj.optJSONObject("channel")?.optString("name") ?: channel)
+                    "joined" -> {
+                        val ch = obj.optJSONObject("channel")
+                        listener.onJoined(
+                            ch?.optString("name") ?: channel,
+                            ch?.optString("alias")?.ifEmpty { null },
+                            obj.optString("floor").ifEmpty { null }
+                        )
+                    }
                     "floor" -> listener.onFloor(
                         busy = obj.optBoolean("busy", false),
                         holder = if (obj.isNull("holder")) null else obj.optString("holder").ifEmpty { null },

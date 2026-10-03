@@ -20,6 +20,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.os.SystemClock
 import android.telephony.TelephonyManager
 import android.view.KeyEvent
 import android.view.MotionEvent
@@ -35,6 +36,7 @@ import com.p25.apx1000.audio.PttEngine
 import com.p25.apx1000.data.Channel
 import com.p25.apx1000.data.UserStore
 import com.p25.apx1000.databinding.ActivityMainBinding
+import com.p25.apx1000.net.UpdateChecker
 import com.p25.apx1000.service.PttService
 import okhttp3.Call
 import okhttp3.Callback
@@ -65,6 +67,12 @@ class MainActivity : AppCompatActivity(), PttService.UiListener {
     private var customPttKey = -1
     private var learningPtt = false
     private var lightState = PttEngine.Light.IDLE
+    private var currentAlias: String? = null
+    private var centerDownAt = 0L
+    private var dialogOpen = false
+    private var scanOriginIndex = 0
+    private var scanPaused = false
+    private var scanRunnable: Runnable? = null
 
     private var codecMode = Codec2.MODE_1600
 
@@ -226,8 +234,14 @@ class MainActivity : AppCompatActivity(), PttService.UiListener {
                 updateStatus()
             }
         }, 2500)
-        // One independent connectivity check so a blocked WebSocket is obvious.
-        handler.postDelayed({ runSelfTest() }, 1200)
+        // Auto check for an over-the-air update on entering the radio screen.
+        handler.postDelayed({
+            UpdateChecker.check(this) { msg ->
+                if (msg != "up-to-date") {
+                    runOnUiThread { Toast.makeText(this, "Update: $msg", Toast.LENGTH_LONG).show() }
+                }
+            }
+        }, 4000)
     }
 
     /** Hide the touch PTT pad on small (PoC/HT) screens; show it on phones. */
@@ -297,12 +311,15 @@ class MainActivity : AppCompatActivity(), PttService.UiListener {
                 val channel = store.addChannel(value)
                 channels = store.channels()
                 channelIndex = channels.indexOfFirst { it.code == channel.code }.coerceAtLeast(0)
+                currentAlias = null
                 applyChannel()
                 Toast.makeText(this, "Added ${channel.name}", Toast.LENGTH_SHORT).show()
             }
             .setNegativeButton(R.string.cancel, null)
             .create()
         // Keypad-only devices: type straight into the field, D-pad reaches OK/Cancel.
+        dialogOpen = true
+        dialog.setOnDismissListener { dialogOpen = false }
         dialog.setOnShowListener { input.requestFocus() }
         dialog.show()
     }
@@ -311,21 +328,22 @@ class MainActivity : AppCompatActivity(), PttService.UiListener {
         val modes = arrayOf(Codec2.MODE_700C, Codec2.MODE_1600, Codec2.MODE_3200, Codec2.MODE_1300)
         val labels = arrayOf("700C · most robotic", "1600 · balanced", "3200 · clearest", "1300 · narrow")
         val checked = modes.indexOf(codecMode).coerceAtLeast(0)
-        AlertDialog.Builder(this)
-            .setTitle(R.string.mode_title)
-            .setSingleChoiceItems(labels, checked) { dialog, which ->
-                codecMode = modes[which]
-                service?.setCodecMode(codecMode)
-                dialog.dismiss()
-                updateFooter()
-            }
-            .show()
+        showDialog(
+            AlertDialog.Builder(this)
+                .setTitle(R.string.mode_title)
+                .setSingleChoiceItems(labels, checked) { dialog, which ->
+                    codecMode = modes[which]
+                    service?.setCodecMode(codecMode)
+                    dialog.dismiss()
+                    updateFooter()
+                }
+        )
     }
 
     private fun applyChannel() {
         val channel = channels.getOrNull(channelIndex) ?: return
-        binding.radioDisplay.zone = channel.zone
-        binding.radioDisplay.channel = channel.name
+        binding.radioDisplay.zone = "ZONE ${channel.zone}"
+        binding.radioDisplay.channel = currentAlias ?: channel.displayName
         binding.radioDisplay.softkeyHighlight = softkeyIndex
         pushChannelToService()
         updateFooter()
@@ -334,12 +352,13 @@ class MainActivity : AppCompatActivity(), PttService.UiListener {
     private fun pushChannelToService() {
         val channel = channels.getOrNull(channelIndex) ?: return
         val unitId = store.currentUnitId ?: return
-        service?.setChannel(unitId, channel.code)
+        service?.setChannel(unitId, store.currentUsername ?: "", channel.code)
     }
 
     private fun cycleChannel(delta: Int = 1) {
         if (channels.isEmpty()) return
         channelIndex = ((channelIndex + delta) % channels.size + channels.size) % channels.size
+        currentAlias = null
         applyChannel()
     }
 
@@ -350,17 +369,48 @@ class MainActivity : AppCompatActivity(), PttService.UiListener {
         updateFooter()
     }
 
-    /** Activate the highlighted soft key (CENTER/ENTER or the left/right soft keys). */
+    /** Activate the highlighted soft key (short OK / soft keys). */
     private fun activateSoftkey(index: Int) {
         when (index) {
             0 -> cycleChannel(1) // Chan: next channel
-            1 -> {               // Scan: toggle scan
-                scanEnabled = !scanEnabled
-                Toast.makeText(this, if (scanEnabled) "Scan ON" else "Scan OFF", Toast.LENGTH_SHORT).show()
-                updateFooter()
-            }
-            2 -> showOptionsDialog() // Cnts: menu (has no dedicated MENU key on PoC)
+            1 -> toggleScan()    // Scan
+            2 -> showOptionsDialog() // Cnts: menu (no dedicated MENU key on PoC)
         }
+    }
+
+    private fun toggleScan() {
+        scanEnabled = !scanEnabled
+        if (scanEnabled) {
+            scanOriginIndex = channelIndex
+            scanPaused = false
+            val r = object : Runnable {
+                override fun run() {
+                    if (!scanEnabled) return
+                    if (!scanPaused) advanceScan()
+                    handler.postDelayed(this, 1200)
+                }
+            }
+            scanRunnable = r
+            handler.postDelayed(r, 1200)
+        } else {
+            scanRunnable?.let { handler.removeCallbacks(it) }
+            scanRunnable = null
+            channelIndex = scanOriginIndex
+            currentAlias = null
+            applyChannel()
+        }
+        Toast.makeText(this, if (scanEnabled) "Scan ON" else "Scan OFF", Toast.LENGTH_SHORT).show()
+        updateFooter()
+    }
+
+    private fun advanceScan() {
+        val cur = channels.getOrNull(channelIndex) ?: return
+        val inZone = channels.indices.filter { channels[it].zone == cur.zone }
+        if (inZone.size <= 1) return
+        val pos = inZone.indexOf(channelIndex)
+        channelIndex = inZone[(pos + 1) % inZone.size]
+        currentAlias = null
+        applyChannel()
     }
 
     private fun updateFooter() {
@@ -406,6 +456,17 @@ class MainActivity : AppCompatActivity(), PttService.UiListener {
         this.busy = busy
         updateStatus()
         updateFooter()
+        if (scanEnabled) {
+            if (busy && !scanPaused) {
+                scanPaused = true
+            } else if (!busy && scanPaused) {
+                // Detected channel stopped TX -> return to the origin channel.
+                scanPaused = false
+                channelIndex = scanOriginIndex
+                currentAlias = null
+                applyChannel()
+            }
+        }
     }
 
     override fun onError(message: String) {
@@ -419,6 +480,12 @@ class MainActivity : AppCompatActivity(), PttService.UiListener {
         connDetail = detail
         updateStatus()
         updateFooter()
+    }
+
+    override fun onAlias(alias: String?) {
+        currentAlias = alias
+        val ch = channels.getOrNull(channelIndex)
+        binding.radioDisplay.channel = alias ?: (ch?.displayName ?: "P25")
     }
 
     private fun updateStatus() {
@@ -539,7 +606,7 @@ class MainActivity : AppCompatActivity(), PttService.UiListener {
             service?.handleKeyEvent(event)
             return true
         }
-        if (binding.radioContainer.visibility == View.VISIBLE && handleRadioKey(event)) {
+        if (binding.radioContainer.visibility == View.VISIBLE && !dialogOpen && handleRadioKey(event)) {
             return true
         }
         return super.dispatchKeyEvent(event)
@@ -554,7 +621,15 @@ class MainActivity : AppCompatActivity(), PttService.UiListener {
             KeyEvent.KEYCODE_DPAD_RIGHT -> if (down) moveSoftkey(1)
             KeyEvent.KEYCODE_DPAD_CENTER,
             KeyEvent.KEYCODE_ENTER,
-            KeyEvent.KEYCODE_NUMPAD_ENTER -> if (down) showOptionsDialog()
+            KeyEvent.KEYCODE_NUMPAD_ENTER -> {
+                if (event.action == KeyEvent.ACTION_DOWN) {
+                    if (centerDownAt == 0L) centerDownAt = SystemClock.uptimeMillis()
+                } else if (event.action == KeyEvent.ACTION_UP) {
+                    val hold = SystemClock.uptimeMillis() - centerDownAt
+                    centerDownAt = 0L
+                    if (hold >= 3000L) showOptionsDialog() else activateSoftkey(softkeyIndex)
+                }
+            }
             KeyEvent.KEYCODE_SOFT_LEFT -> if (down) activateSoftkey(0)
             KeyEvent.KEYCODE_SOFT_RIGHT -> if (down) activateSoftkey(2)
             KeyEvent.KEYCODE_MENU,
@@ -563,6 +638,14 @@ class MainActivity : AppCompatActivity(), PttService.UiListener {
             else -> return false
         }
         return true
+    }
+
+    private fun showDialog(builder: AlertDialog.Builder): AlertDialog {
+        dialogOpen = true
+        val d = builder.create()
+        d.setOnDismissListener { dialogOpen = false }
+        d.show()
+        return d
     }
 
     private fun showOptionsDialog() {
@@ -577,49 +660,113 @@ class MainActivity : AppCompatActivity(), PttService.UiListener {
             "Toggle sidetone (hear yourself)",
             "Replay last RX",
             "Add channel",
+            "Set zone count",
+            "Assign channel to zone",
+            "Check update",
             "Logout"
         )
-        AlertDialog.Builder(this)
-            .setTitle("Options")
-            .setItems(items) { _, which ->
-                when (which) {
-                    0 -> runSelfTest()
-                    1 -> testMic()
-                    2 -> {
-                        connDetail = "RECONNECT"
-                        updateStatus()
-                        pushChannelToService()
-                        Toast.makeText(this, "Reconnecting…", Toast.LENGTH_SHORT).show()
+        showDialog(
+            AlertDialog.Builder(this)
+                .setTitle("Options")
+                .setItems(items) { _, which ->
+                    when (which) {
+                        0 -> runSelfTest()
+                        1 -> testMic()
+                        2 -> {
+                            connDetail = "RECONNECT"
+                            updateStatus()
+                            pushChannelToService()
+                            Toast.makeText(this, "Reconnecting…", Toast.LENGTH_SHORT).show()
+                        }
+                        3 -> {
+                            learningPtt = true
+                            Toast.makeText(this, "Press the side PTT key now…", Toast.LENGTH_LONG).show()
+                        }
+                        4 -> {
+                            store.layoutMode = if (store.layoutMode == 2) 1 else 2
+                            applyResponsiveLayout()
+                            Toast.makeText(
+                                this,
+                                if (store.layoutMode == 2) "PoC/keypad layout" else "Phone layout",
+                                Toast.LENGTH_SHORT
+                            ).show()
+                        }
+                        5 -> showModeDialog()
+                        6 -> {
+                            busy = !busy
+                            service?.setChannelBusy(busy)
+                        }
+                        7 -> {
+                            val on = !(service?.sidetoneEnabled() ?: false)
+                            service?.setSidetone(on)
+                            Toast.makeText(this, if (on) "Sidetone ON" else "Sidetone OFF", Toast.LENGTH_SHORT).show()
+                        }
+                        8 -> service?.replayRx(REMOTE_ID)
+                        9 -> showAddChannelDialog()
+                        10 -> showZoneCountDialog()
+                        11 -> showAssignZoneDialog()
+                        12 -> checkUpdate()
+                        13 -> logout()
                     }
-                    3 -> {
-                        learningPtt = true
-                        Toast.makeText(this, "Press the side PTT key now…", Toast.LENGTH_LONG).show()
-                    }
-                    4 -> {
-                        store.layoutMode = if (store.layoutMode == 2) 1 else 2
-                        applyResponsiveLayout()
-                        Toast.makeText(
-                            this,
-                            if (store.layoutMode == 2) "PoC/keypad layout" else "Phone layout",
-                            Toast.LENGTH_SHORT
-                        ).show()
-                    }
-                    5 -> showModeDialog()
-                    6 -> {
-                        busy = !busy
-                        service?.setChannelBusy(busy)
-                    }
-                    7 -> {
-                        val on = !(service?.sidetoneEnabled() ?: false)
-                        service?.setSidetone(on)
-                        Toast.makeText(this, if (on) "Sidetone ON" else "Sidetone OFF", Toast.LENGTH_SHORT).show()
-                    }
-                    8 -> service?.replayRx(REMOTE_ID)
-                    9 -> showAddChannelDialog()
-                    10 -> logout()
                 }
+        )
+    }
+
+    private fun showZoneCountDialog() {
+        val input = EditText(this).apply {
+            hint = "Number of zones (1-9)"
+            setPadding(48, 32, 48, 32)
+            inputType = android.text.InputType.TYPE_CLASS_NUMBER
+            setText(store.zoneCount.toString())
+        }
+        val d = AlertDialog.Builder(this)
+            .setTitle("Set zone count")
+            .setView(input)
+            .setPositiveButton("OK") { _, _ ->
+                store.zoneCount = input.text.toString().toIntOrNull()?.coerceIn(1, 9) ?: store.zoneCount
+                applyChannel()
+                Toast.makeText(this, "Zones: ${store.zoneCount}", Toast.LENGTH_SHORT).show()
             }
-            .show()
+            .setNegativeButton("Cancel", null)
+            .create()
+        dialogOpen = true
+        d.setOnDismissListener { dialogOpen = false }
+        d.setOnShowListener { input.requestFocus() }
+        d.show()
+    }
+
+    private fun showAssignZoneDialog() {
+        val list = channels
+        if (list.isEmpty()) return
+        val names = list.map { "${it.displayName} (${it.code}) [Z${it.zone}]" }.toTypedArray()
+        showDialog(
+            AlertDialog.Builder(this)
+                .setTitle("Choose channel")
+                .setItems(names) { _, which ->
+                    chooseZoneFor(list[which])
+                }
+        )
+    }
+
+    private fun chooseZoneFor(channel: Channel) {
+        val zones = (1..store.zoneCount).map { "ZONE $it" }.toTypedArray()
+        showDialog(
+            AlertDialog.Builder(this)
+                .setTitle("Assign ${channel.displayName} to zone")
+                .setItems(zones) { _, which ->
+                    store.setChannelZone(channel.code, which + 1)
+                    channels = store.channels()
+                    currentAlias = null
+                    applyChannel()
+                }
+        )
+    }
+
+    private fun checkUpdate() {
+        Toast.makeText(this, "Checking update…", Toast.LENGTH_SHORT).show()
+        UpdateChecker.check(this) { msg ->
+            runOnUiThread { Toast.makeText(this, "Update: $msg", Toast.LENGTH_LONG).show() }
+        }
     }
 
     // ---- Signal / battery ----------------------------------------------
