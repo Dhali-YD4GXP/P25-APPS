@@ -16,10 +16,16 @@ import kotlin.math.min
 /**
  * APX1000 radio skin, styled after the reference LCD:
  * light grey screen, bold black text, green signal/battery, orange status dot,
- * and a dark soft-key bar (Chan / Scan / Cnts) in white.
+ * dark soft-key bar (Chan / Scan / Cnts) in white.
  *
- * Drawn against a fixed 480x280 design surface and scaled proportionally, so it
- * fits a small 320x240 HT display and the top half of a large smartphone.
+ * Display rules:
+ *  - Zone is always shown ("ZONE 1").
+ *  - The channel/talkgroup is shown large (default "P25").
+ *  - Battery icon with a live percentage, and a live signal meter.
+ *  - "ID : XXXX" is shown ONLY while a device is transmitting (RX from a peer,
+ *    or our own TX), never as a permanent own-ID.
+ *
+ * Drawn against a fixed 480x280 design surface and scaled proportionally.
  */
 class Apx1000View @JvmOverloads constructor(
     context: Context,
@@ -32,7 +38,7 @@ class Apx1000View @JvmOverloads constructor(
     var zone: String = "ZONE 1"
         set(v) { field = v; invalidate() }
 
-    var channel: String = "APX-1000"
+    var channel: String = "P25"
         set(v) { field = v; invalidate() }
 
     var unitId: String = "----"
@@ -44,13 +50,13 @@ class Apx1000View @JvmOverloads constructor(
     var light: Light = Light.IDLE
         set(v) { field = v; invalidate() }
 
-    var signalLevel: Int = 4
+    var signalLevel: Int = 0
         set(v) { field = v.coerceIn(0, 4); invalidate() }
 
-    var batteryPct: Int = 82
-        set(v) { field = v.coerceIn(0, 100); invalidate() }
+    var batteryPct: Int = -1
+        set(v) { field = v.coerceIn(-1, 100); invalidate() }
 
-    var softkeyHighlight: Int = -1
+    var softkeyHighlight: Int = 0
         set(v) { field = v; invalidate() }
 
     var statusText: String = "READY"
@@ -69,6 +75,14 @@ class Apx1000View @JvmOverloads constructor(
             Light.TX -> YELLOW
             Light.INHIBIT -> RED
             Light.IDLE -> BEZEL_EDGE
+        }
+
+    /** The unit currently transmitting, if any. Only valid while TX/RX is active. */
+    private val activeSpeaker: String?
+        get() = when (light) {
+            Light.TX -> unitId
+            Light.RX -> speakerId
+            else -> null
         }
 
     override fun onDraw(canvas: Canvas) {
@@ -102,7 +116,6 @@ class Apx1000View @JvmOverloads constructor(
     private fun drawScreen(canvas: Canvas) {
         screenRect.set(SCREEN_INSET, SCREEN_INSET, DESIGN_W - SCREEN_INSET, DESIGN_H - SCREEN_INSET)
 
-        // Backlight glow + border keyed to RX/TX/Busy.
         paint.style = Paint.Style.STROKE
         paint.strokeWidth = 10f
         paint.color = withAlpha(backlightColor, 0x40)
@@ -111,7 +124,6 @@ class Apx1000View @JvmOverloads constructor(
         paint.color = backlightColor
         canvas.drawRoundRect(screenRect, 8f, 8f, paint)
 
-        // LCD background: light grey with a subtle vertical gradient.
         paint.style = Paint.Style.FILL
         paint.shader = LinearGradient(
             screenRect.left, screenRect.top, screenRect.left, screenRect.bottom,
@@ -127,27 +139,27 @@ class Apx1000View @JvmOverloads constructor(
 
     private fun drawStatusBar(canvas: Canvas) {
         val left = screenRect.left + 14f
-        val top = screenRect.top + 12f
+        val top = screenRect.top + 10f
 
         // Left tick.
-        paint.color = GREEN
         paint.style = Paint.Style.FILL
-        canvas.drawRect(left, top + 10f, left + 3f, top + 40f, paint)
+        paint.color = GREEN
+        canvas.drawRect(left, top + 8f, left + 3f, top + 38f, paint)
 
-        // Signal bars.
+        // Signal bars (live).
         val barW = 8f
         val gap = 5f
-        val baseY = top + 40f
+        val baseY = top + 38f
         val heights = floatArrayOf(14f, 22f, 30f, 38f)
         for (i in 0 until 4) {
             val bx = left + 9f + i * (barW + gap)
+            paint.style = Paint.Style.FILL
             paint.color = if (i < signalLevel) GREEN else withAlpha(GREEN, 0x33)
             canvas.drawRect(bx, baseY - heights[i], bx + barW, baseY, paint)
             paint.style = Paint.Style.STROKE
             paint.strokeWidth = 1.5f
             paint.color = withAlpha(Color.BLACK, 0x55)
             canvas.drawRect(bx, baseY - heights[i], bx + barW, baseY, paint)
-            paint.style = Paint.Style.FILL
         }
 
         // Transmit/grant triangle.
@@ -157,39 +169,46 @@ class Apx1000View @JvmOverloads constructor(
         path.lineTo(tx + 20f, baseY - 17f)
         path.lineTo(tx, baseY)
         path.close()
-        paint.color = if (light == Light.IDLE) TEXT else backlightColor
+        paint.style = Paint.Style.FILL
+        paint.color = if (activeSpeaker != null) backlightColor else TEXT
         canvas.drawPath(path, paint)
 
-        // Center cluster: zone label + orange status dot + channel icon.
+        // Center cluster: zone + orange dot + channel icon.
         textPaint.typeface = BOLD
-        textPaint.textSize = 34f
+        textPaint.textSize = 32f
         textPaint.color = TEXT
-        val zoneText = zone
+        val zoneText = "Z$zoneValue"
         val zw = textPaint.measureText(zoneText)
         val iconW = 40f
-        val groupW = zw + 14f + iconW
-        var gx = screenRect.centerX() - groupW / 2f
-        canvas.drawText(zoneText, gx, top + 38f, textPaint)
+        var gx = screenRect.centerX() - (zw + 14f + iconW) / 2f
+        canvas.drawText(zoneText, gx, top + 36f, textPaint)
         gx += zw + 6f
+        paint.style = Paint.Style.FILL
         paint.color = ORANGE
-        canvas.drawCircle(gx + 4f, top + 30f, 5.5f, paint)
+        canvas.drawCircle(gx + 4f, top + 28f, 5.5f, paint)
         gx += 14f
-        drawChannelIcon(canvas, gx, top + 12f, top + 42f)
+        drawChannelIcon(canvas, gx, top + 10f, top + 40f)
 
-        // Battery.
+        // Battery icon + live percentage.
         val batW = 40f
         val batH = 24f
         val batRight = screenRect.right - 14f
-        val batTop = top + 12f
+        val batTop = top + 10f
         paint.style = Paint.Style.STROKE
         paint.strokeWidth = 2.5f
         paint.color = TEXT
         canvas.drawRect(batRight - batW, batTop, batRight, batTop + batH, paint)
         paint.style = Paint.Style.FILL
         canvas.drawRect(batRight, batTop + batH / 2f - 4f, batRight + 5f, batTop + batH / 2f + 4f, paint)
-        val fillW = (batW - 8f) * batteryPct / 100f
-        paint.color = if (batteryPct <= 15) RED else GREEN
-        canvas.drawRect(batRight - batW + 4f, batTop + 4f, batRight - batW + 4f + fillW, batTop + batH - 4f, paint)
+        if (batteryPct >= 0) {
+            val fillW = (batW - 8f) * batteryPct / 100f
+            paint.color = if (batteryPct <= 15) RED else GREEN
+            canvas.drawRect(batRight - batW + 4f, batTop + 4f, batRight - batW + 4f + fillW, batTop + batH - 4f, paint)
+        }
+        textPaint.textSize = 22f
+        textPaint.color = TEXT
+        val pct = if (batteryPct < 0) "--%" else "$batteryPct%"
+        canvas.drawText(pct, batRight - batW - 12f - textPaint.measureText(pct), batTop + batH - 3f, textPaint)
     }
 
     private fun drawChannelIcon(canvas: Canvas, x: Float, top: Float, bottom: Float) {
@@ -201,25 +220,21 @@ class Apx1000View @JvmOverloads constructor(
         val midY = (top + bottom) / 2f
         canvas.drawLine(x + 3f, midY, x + 27f, midY, paint)
         path.reset()
-        path.moveTo(x + 3f, midY)
-        path.lineTo(x + 10f, midY - 6f)
-        path.moveTo(x + 3f, midY)
-        path.lineTo(x + 10f, midY + 6f)
-        path.moveTo(x + 27f, midY)
-        path.lineTo(x + 20f, midY - 6f)
-        path.moveTo(x + 27f, midY)
-        path.lineTo(x + 20f, midY + 6f)
+        path.moveTo(x + 3f, midY); path.lineTo(x + 10f, midY - 6f)
+        path.moveTo(x + 3f, midY); path.lineTo(x + 10f, midY + 6f)
+        path.moveTo(x + 27f, midY); path.lineTo(x + 20f, midY - 6f)
+        path.moveTo(x + 27f, midY); path.lineTo(x + 20f, midY + 6f)
         canvas.drawPath(path, paint)
         paint.style = Paint.Style.FILL
     }
 
     private fun drawMainArea(canvas: Canvas) {
-        // Brand line.
+        // Zone label (always visible).
         textPaint.typeface = BOLD
-        textPaint.textSize = 32f
+        textPaint.textSize = 30f
         textPaint.color = TEXT
-        val brand = "MOTOROLA P25"
-        canvas.drawText(brand, screenRect.centerX() - textPaint.measureText(brand) / 2f, screenRect.top + 100f, textPaint)
+        val z = "ZONE $zoneValue"
+        canvas.drawText(z, screenRect.centerX() - textPaint.measureText(z) / 2f, screenRect.top + 96f, textPaint)
 
         // Channel / talkgroup (large).
         textPaint.textSize = 64f
@@ -230,31 +245,25 @@ class Apx1000View @JvmOverloads constructor(
             textPaint.textSize -= 2f
             chW = textPaint.measureText(ch)
         }
-        canvas.drawText(ch, screenRect.centerX() - chW / 2f, screenRect.top + 166f, textPaint)
+        canvas.drawText(ch, screenRect.centerX() - chW / 2f, screenRect.top + 156f, textPaint)
 
-        // Speaker / operator ID line (RX mandates the exact "ID : XXXX" format).
-        val idLine = when {
-            light == Light.RX && speakerId != null -> "ID : $speakerId"
-            speakerId != null -> "ID : $speakerId"
-            else -> "ID : $unitId"
+        // "ID : XXXX" only while a device is transmitting.
+        val speaker = activeSpeaker
+        if (speaker != null) {
+            textPaint.textSize = 30f
+            textPaint.color = if (light == Light.INHIBIT) RED else GREEN_DARK
+            val idLine = "ID : $speaker"
+            canvas.drawText(idLine, screenRect.centerX() - textPaint.measureText(idLine) / 2f, screenRect.top + 194f, textPaint)
         }
-        textPaint.textSize = 30f
-        textPaint.color = when {
-            light == Light.RX -> GREEN_DARK
-            light == Light.INHIBIT -> RED
-            else -> TEXT
-        }
-        canvas.drawText(idLine, screenRect.centerX() - textPaint.measureText(idLine) / 2f, screenRect.top + 204f, textPaint)
     }
 
     private fun drawSoftkeys(canvas: Canvas) {
-        val barTop = screenRect.bottom - 50f
+        val barTop = screenRect.bottom - 46f
         val bar = RectF(screenRect.left, barTop, screenRect.right, screenRect.bottom)
 
         paint.style = Paint.Style.FILL
         paint.color = SOFT_BG
         canvas.drawRoundRect(bar, 8f, 8f, paint)
-        // cover top rounded corners to square off the join with the screen
         canvas.drawRect(screenRect.left, barTop, screenRect.right, barTop + 8f, paint)
 
         paint.color = SOFT_DIV
@@ -267,14 +276,16 @@ class Apx1000View @JvmOverloads constructor(
         textPaint.textSize = 28f
         for (i in 0 until cells) {
             val cx0 = screenRect.left + i * cellW
+            if (i == softkeyHighlight) {
+                paint.style = Paint.Style.FILL
+                paint.color = SOFT_HILITE
+                canvas.drawRect(cx0 + 2f, barTop + 2f, cx0 + cellW - 2f, screenRect.bottom - 2f, paint)
+            }
             if (i > 0) {
+                paint.style = Paint.Style.STROKE
                 paint.color = SOFT_DIV
                 paint.strokeWidth = 2f
                 canvas.drawLine(cx0, barTop, cx0, screenRect.bottom, paint)
-            }
-            if (i == softkeyHighlight) {
-                paint.color = SOFT_HILITE
-                canvas.drawRect(cx0 + 2f, barTop + 2f, cx0 + cellW - 2f, screenRect.bottom - 2f, paint)
             }
             textPaint.color = SOFT_TEXT
             val label = SOFTKEYS[i]
@@ -282,6 +293,13 @@ class Apx1000View @JvmOverloads constructor(
             canvas.drawText(label, cx0 + cellW / 2f - tw / 2f, bar.centerY() + 10f, textPaint)
         }
     }
+
+    /** Accepts "ZONE 1", "1" or "zone1" and renders "ZONE 1". */
+    private val zoneValue: String
+        get() {
+            val digits = zone.filter { it.isDigit() }
+            return digits.ifEmpty { zone.uppercase().removePrefix("ZONE").trim().ifEmpty { "1" } }
+        }
 
     private fun withAlpha(color: Int, alpha: Int): Int =
         (color and 0x00FFFFFF) or ((alpha and 0xFF) shl 24)

@@ -8,7 +8,10 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.content.ServiceConnection
 import android.content.pm.PackageManager
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.net.wifi.WifiManager
+import android.os.BatteryManager
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -58,9 +61,10 @@ class MainActivity : AppCompatActivity(), PttService.UiListener {
 
     private val batteryReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
-            val level = intent?.getIntExtra("level", 0) ?: 0
-            val scale = intent?.getIntExtra("scale", 100) ?: 100
-            binding.radioDisplay.batteryPct = if (scale > 0) level * 100 / scale else 0
+            val level = intent?.getIntExtra(BatteryManager.EXTRA_LEVEL, -1) ?: -1
+            val scale = intent?.getIntExtra(BatteryManager.EXTRA_SCALE, -1) ?: -1
+            binding.radioDisplay.batteryPct =
+                if (level >= 0 && scale > 0) level * 100 / scale else -1
         }
     }
 
@@ -102,7 +106,12 @@ class MainActivity : AppCompatActivity(), PttService.UiListener {
         super.onStart()
         bindService(Intent(this, PttService::class.java), connection, Context.BIND_AUTO_CREATE)
         bound = true
-        registerReceiver(batteryReceiver, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+        val filter = IntentFilter(Intent.ACTION_BATTERY_CHANGED)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(batteryReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            registerReceiver(batteryReceiver, filter)
+        }
     }
 
     override fun onResume() {
@@ -180,11 +189,10 @@ class MainActivity : AppCompatActivity(), PttService.UiListener {
         applyResponsiveLayout()
     }
 
-    /** HT (small) gets a full-screen skin; phones get skin + large touch PTT. */
+    /** HT (small) hides the touch PTT pad; phones show skin + large touch PTT. */
     private fun applyResponsiveLayout() {
-        val dm = resources.displayMetrics
-        val widthInches = dm.widthPixels / dm.xdpi
-        val small = widthInches < 3.2f
+        val smallestDp = resources.configuration.smallestScreenWidthDp
+        val small = smallestDp in 1 until 320
         binding.pttPadWrap.visibility = if (small) View.GONE else View.VISIBLE
     }
 
@@ -325,6 +333,7 @@ class MainActivity : AppCompatActivity(), PttService.UiListener {
             PttEngine.Light.INHIBIT -> com.p25.apx1000.ui.Apx1000View.Light.INHIBIT
             PttEngine.Light.IDLE -> com.p25.apx1000.ui.Apx1000View.Light.IDLE
         }
+        if (light == PttEngine.Light.IDLE) binding.radioDisplay.speakerId = null
         updateFooter()
     }
 
@@ -421,19 +430,59 @@ class MainActivity : AppCompatActivity(), PttService.UiListener {
 
     private fun updateSignalAndNetwork() {
         try {
+            var online = false
+            var isWifi = false
+            var isCell = false
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+                val net = cm?.activeNetwork
+                val caps = if (net != null) cm.getNetworkCapabilities(net) else null
+                online = caps?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
+                isWifi = caps?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true
+                isCell = caps?.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) == true
+            } else {
+                @Suppress("DEPRECATION")
+                val ni = (getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager)?.activeNetworkInfo
+                online = ni?.isConnected == true
+                @Suppress("DEPRECATION")
+                isWifi = ni?.type == ConnectivityManager.TYPE_WIFI
+                @Suppress("DEPRECATION")
+                isCell = ni?.type == ConnectivityManager.TYPE_MOBILE
+            }
+
+            val level = when {
+                isWifi -> wifiLevel()
+                isCell -> cellularLevel()
+                online -> 3
+                else -> 0
+            }
+            binding.radioDisplay.signalLevel = level.coerceIn(0, 4)
+            networkLabel = when {
+                isWifi -> "WIFI"
+                isCell -> "LTE"
+                online -> "NET"
+                else -> "NO SIG"
+            }
+            // Do not clobber the ONLINE/OFFLINE/ERR status set elsewhere.
+            if (!busy && service?.isOnline() != true) {
+                binding.radioDisplay.statusText = networkLabel
+            }
+        } catch (_: Throwable) {
+            binding.radioDisplay.signalLevel = 0
+        }
+    }
+
+    private fun wifiLevel(): Int {
+        return try {
             val wifi = applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
             val info = wifi?.connectionInfo
-            val connected = info != null && info.networkId != -1
-            val level = if (connected) {
-                WifiManager.calculateSignalLevel(info!!.rssi, 5)
+            if (info != null && info.networkId != -1) {
+                WifiManager.calculateSignalLevel(info.rssi, 5).coerceIn(1, 4)
             } else {
-                cellularLevel()
+                2
             }
-            binding.radioDisplay.signalLevel = level
-            networkLabel = if (connected) "WIFI" else "LTE"
-            if (!busy) binding.radioDisplay.statusText = networkLabel
         } catch (_: Throwable) {
-            binding.radioDisplay.signalLevel = 2
+            2
         }
     }
 
@@ -441,12 +490,12 @@ class MainActivity : AppCompatActivity(), PttService.UiListener {
         return try {
             val tm = getSystemService(Context.TELEPHONY_SERVICE) as? TelephonyManager
             when {
-                tm == null -> 0
+                tm == null -> 2
                 ContextCompat.checkSelfPermission(this, Manifest.permission.READ_PHONE_STATE)
                     != PackageManager.PERMISSION_GRANTED -> 2
                 Build.VERSION.SDK_INT >= Build.VERSION_CODES.P -> {
                     val ss = tm.signalStrength
-                    if (ss != null) (WifiManager.calculateSignalLevel(ss.level, 5)).coerceIn(0, 4) else 2
+                    if (ss != null) WifiManager.calculateSignalLevel(ss.level, 5).coerceIn(1, 4) else 2
                 }
                 else -> 2
             }

@@ -42,6 +42,12 @@ mic PCM (8 kHz) -> Codec 2 encode -> packed bits -> Codec 2 decode -> speaker
 
 Backlight convention: **Green = RX, Yellow = TX, Red = Inhibit/Busy**.
 
+Display details: the zone always reads **ZONE 1** (normalised from the channel's
+zone), the talkgroup defaults to **P25** (`P25-CH-1000`), the battery shows a
+live percentage, and the signal meter reflects the active Wi-Fi/cellular link.
+The **`ID : XXXX`** line is shown **only while a unit is transmitting** — the
+peer's Unit ID on RX, or the local Unit ID on TX — and is hidden when idle.
+
 ## Keypad operation (no touch screen)
 
 Designed to run on keypad-only PoC/HT devices (e.g. Hytera PNC380) with no

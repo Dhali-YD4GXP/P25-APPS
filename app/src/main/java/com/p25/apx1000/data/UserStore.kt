@@ -89,11 +89,14 @@ class UserStore(context: Context) {
 
     fun channels(): List<Channel> {
         val raw = prefs.getString(KEY_CHANNELS, null)
-            ?: return listOf(Channel(name = "APX-1000", code = "P25-CH-1000"))
+            ?: return listOf(Channel(name = "P25", code = "P25-CH-1000", zone = "ZONE 1"))
         val arr = JSONArray(raw)
         return (0 until arr.length()).map { i ->
             val o = arr.getJSONObject(i)
             Channel(o.getString("n"), o.getString("c"), o.optString("z", "ZONE 1"))
+        }.map {
+            // one-time rebrand of the previous default name
+            if (it.name.equals("APX-1000", ignoreCase = true)) it.copy(name = "P25") else it
         }
     }
 

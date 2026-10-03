@@ -6,6 +6,8 @@ import android.media.AudioManager
 import android.media.AudioRecord
 import android.media.AudioTrack
 import android.media.MediaRecorder
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import java.util.Collections
 
@@ -46,6 +48,9 @@ class PttEngine(context: Context, private val listener: Listener) {
     private var audioTrack: AudioTrack? = null
 
     private val playLock = Any()
+    private val rxLock = Any()
+    private val handler = Handler(Looper.getMainLooper())
+    private val rxTimeout = Runnable { stopRxPlayback() }
     private val lastTxFrames: MutableList<ByteArray> =
         Collections.synchronizedList(ArrayList())
 
@@ -70,11 +75,13 @@ class PttEngine(context: Context, private val listener: Listener) {
 
     fun start(mode: Int = codecMode) {
         try {
-            releaseCodecs()
-            codecMode = mode
-            encoder = Codec2Codec(mode)
-            rxDecoder = Codec2Codec(mode)
-            sidetoneDecoder = Codec2Codec(mode)
+            synchronized(rxLock) {
+                releaseCodecs()
+                codecMode = mode
+                encoder = Codec2Codec(mode)
+                rxDecoder = Codec2Codec(mode)
+                sidetoneDecoder = Codec2Codec(mode)
+            }
             if (encoder?.isReady != true) {
                 listener.onError("Codec 2 init failed (mode=$mode)")
                 return
@@ -122,8 +129,12 @@ class PttEngine(context: Context, private val listener: Listener) {
     }
 
     /** Begin a transmission unconditionally (floor already granted). */
+    @Synchronized
     fun beginTx() {
         if (capturing) return
+        handler.removeCallbacks(rxTimeout)
+        rxPlaying = false
+        listener.onSpeaker(null)
         capturing = true
         setLight(Light.TX)
         Thread(Runnable { captureLoop() }, "ptt-tx").start()
@@ -144,6 +155,7 @@ class PttEngine(context: Context, private val listener: Listener) {
     }
 
     /** Local (offline) PTT: check busy then transmit. Safe from any thread. */
+    @Synchronized
     fun pttDown() {
         if (capturing) return
         if (channelBusy) {
@@ -154,8 +166,11 @@ class PttEngine(context: Context, private val listener: Listener) {
     }
 
     /** End a transmission. Safe to call from any thread. */
+    @Synchronized
     fun pttUp() {
         capturing = false
+        handler.removeCallbacks(rxTimeout)
+        rxPlaying = false
         setLight(Light.IDLE)
         listener.onSpeaker(null)
     }
@@ -228,11 +243,16 @@ class PttEngine(context: Context, private val listener: Listener) {
             }
             setLight(Light.RX)
             listener.onSpeaker(unitId)
-            val dec = rxDecoder ?: return@Runnable
             for (f in frames) {
                 if (!rxPlaying) break
                 try {
-                    writePlayback(dec.decode(f))
+                    var pcm: ShortArray? = null
+                    synchronized(rxLock) {
+                        val d = rxDecoder
+                        if (d != null) pcm = d.decode(f)
+                    }
+                    val out = pcm ?: break
+                    writePlayback(out)
                 } catch (_: Throwable) {
                 }
             }
@@ -248,19 +268,29 @@ class PttEngine(context: Context, private val listener: Listener) {
 
     /** Decode and play a single remote vocoder frame (called by transport). */
     fun decodeAndPlay(bits: ByteArray) {
-        val dec = rxDecoder ?: return
         try {
-            if (!rxPlaying) {
-                setLight(Light.RX)
+            var decoded: ShortArray? = null
+            synchronized(rxLock) {
+                val dec = rxDecoder
+                if (dec != null) decoded = dec.decode(bits)
             }
-            writePlayback(dec.decode(bits))
+            val pcm = decoded ?: return
+            val wasPlaying = rxPlaying
+            rxPlaying = true
+            if (!wasPlaying) setLight(Light.RX)
+            writePlayback(pcm)
+            // Fall back to IDLE if the server never sends floor release.
+            handler.removeCallbacks(rxTimeout)
+            handler.postDelayed(rxTimeout, RX_TIMEOUT_MS)
         } catch (t: Throwable) {
             Log.w(TAG, "decodeAndPlay failed", t)
         }
     }
 
+    @Synchronized
     fun stopRxPlayback() {
         rxPlaying = false
+        handler.removeCallbacks(rxTimeout)
         setLight(Light.IDLE)
         listener.onSpeaker(null)
     }
@@ -292,25 +322,31 @@ class PttEngine(context: Context, private val listener: Listener) {
     }
 
     private fun releaseCodecs() {
-        encoder?.close(); encoder = null
-        rxDecoder?.close(); rxDecoder = null
-        sidetoneDecoder?.close(); sidetoneDecoder = null
+        synchronized(rxLock) {
+            encoder?.close(); encoder = null
+            rxDecoder?.close(); rxDecoder = null
+            sidetoneDecoder?.close(); sidetoneDecoder = null
+        }
     }
 
+    @Synchronized
     fun release() {
         capturing = false
         rxPlaying = false
+        handler.removeCallbacks(rxTimeout)
         synchronized(lastTxFrames) { lastTxFrames.clear() }
-        try {
-            audioRecord?.stop()
-        } catch (_: Throwable) {
+        synchronized(playLock) {
+            try {
+                audioRecord?.stop()
+            } catch (_: Throwable) {
+            }
+            audioRecord?.release(); audioRecord = null
+            try {
+                audioTrack?.stop()
+            } catch (_: Throwable) {
+            }
+            audioTrack?.release(); audioTrack = null
         }
-        audioRecord?.release(); audioRecord = null
-        try {
-            audioTrack?.stop()
-        } catch (_: Throwable) {
-        }
-        audioTrack?.release(); audioTrack = null
         releaseCodecs()
         tonePlayer.release()
     }
@@ -321,5 +357,6 @@ class PttEngine(context: Context, private val listener: Listener) {
         private const val SIDETONE_GAIN = 0.35f
         private const val MAX_STORED_FRAMES = 250
         private const val INHIBIT_RESET_MS = 400L
+        private const val RX_TIMEOUT_MS = 1400L
     }
 }
