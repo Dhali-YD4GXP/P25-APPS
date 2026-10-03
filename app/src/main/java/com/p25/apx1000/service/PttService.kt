@@ -168,6 +168,12 @@ class PttService : Service(), PttEngine.Listener {
 
     fun txFrames(): Int = engine?.txFrames ?: 0
 
+    fun setSidetone(on: Boolean) {
+        engine?.sidetoneEnabled = on
+    }
+
+    fun sidetoneEnabled(): Boolean = engine?.sidetoneEnabled ?: false
+
     fun replayRx(unitId: String?) = engine?.replayRx(unitId)
 
     fun setCodecMode(mode: Int) = engine?.start(mode)

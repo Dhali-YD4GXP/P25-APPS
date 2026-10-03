@@ -565,6 +565,7 @@ class MainActivity : AppCompatActivity(), PttService.UiListener {
             "Toggle phone / PoC layout",
             "Codec 2 bitrate",
             "Toggle channel busy",
+            "Toggle sidetone (hear yourself)",
             "Replay last RX",
             "Add channel",
             "Logout"
@@ -599,9 +600,14 @@ class MainActivity : AppCompatActivity(), PttService.UiListener {
                         busy = !busy
                         service?.setChannelBusy(busy)
                     }
-                    7 -> service?.replayRx(REMOTE_ID)
-                    8 -> showAddChannelDialog()
-                    9 -> logout()
+                    7 -> {
+                        val on = !(service?.sidetoneEnabled() ?: false)
+                        service?.setSidetone(on)
+                        Toast.makeText(this, if (on) "Sidetone ON" else "Sidetone OFF", Toast.LENGTH_SHORT).show()
+                    }
+                    8 -> service?.replayRx(REMOTE_ID)
+                    9 -> showAddChannelDialog()
+                    10 -> logout()
                 }
             }
             .show()

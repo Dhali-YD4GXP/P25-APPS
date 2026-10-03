@@ -63,6 +63,9 @@ class PttEngine(context: Context, private val listener: Listener) {
     @Volatile var txFrames: Int = 0
         private set
 
+    /** Play back your own digitised voice while transmitting (default off). */
+    @Volatile var sidetoneEnabled: Boolean = false
+
     /** Transport hook: called for every encoded TX frame. */
     @Volatile var onFrameEncoded: ((ByteArray) -> Unit)? = null
 
@@ -205,7 +208,6 @@ class PttEngine(context: Context, private val listener: Listener) {
 
     private fun captureLoop() {
         val enc = encoder ?: return
-        val sidetone = sidetoneDecoder ?: return
         val rec = audioRecord ?: return
         val gain = SIDETONE_GAIN
 
@@ -246,9 +248,12 @@ class PttEngine(context: Context, private val listener: Listener) {
                 lastTxFrames.add(bits.copyOf())
             }
             onFrameEncoded?.invoke(bits)
-            // Local sidetone so the operator hears the digitised voice.
-            val pcm = sidetone.decode(bits)
-            writePlayback(applyGain(pcm, gain))
+            // Optional sidetone so the operator can hear the digitised voice.
+            if (sidetoneEnabled) {
+                sidetoneDecoder?.let { dec ->
+                    writePlayback(applyGain(dec.decode(bits), gain))
+                }
+            }
         }
 
         try {
