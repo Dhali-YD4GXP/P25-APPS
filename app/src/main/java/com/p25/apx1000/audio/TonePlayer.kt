@@ -33,7 +33,7 @@ class TonePlayer(private val context: Context) {
 
     @Volatile private var tptLoaded = false
     private var tptId: Int = 0
-    @Volatile var tptDurationMs: Long = 220L
+    @Volatile var tptDurationMs: Long = 300L
         private set
 
     init {
@@ -41,7 +41,37 @@ class TonePlayer(private val context: Context) {
             tptLoaded = status == 0
             if (status != 0) Log.w(TAG, "Failed to load tpt_p25.wav (status=$status)")
         }
+        tptDurationMs = readWavDurationMs(R.raw.tpt_p25)
         tptId = soundPool.load(context, R.raw.tpt_p25, 1)
+    }
+
+    /** Read the duration of a PCM WAV raw resource so TX waits exactly for the TPT. */
+    private fun readWavDurationMs(resId: Int): Long {
+        return try {
+            val b = context.resources.openRawResource(resId).use { it.readBytes() }
+            if (b.size < 44) return 300L
+            fun le32(o: Int): Int = (b[o].toInt() and 0xff) or
+                ((b[o + 1].toInt() and 0xff) shl 8) or
+                ((b[o + 2].toInt() and 0xff) shl 16) or
+                ((b[o + 3].toInt() and 0xff) shl 24)
+            var i = 12
+            var byteRate = 0
+            var dataSize = 0
+            while (i + 8 <= b.size) {
+                val id = String(b, i, 4, Charsets.US_ASCII)
+                val size = le32(i + 4)
+                if (id == "fmt " && i + 20 <= b.size) {
+                    byteRate = le32(i + 16)
+                } else if (id == "data") {
+                    dataSize = size
+                    break
+                }
+                i += 8 + size + (size and 1)
+            }
+            if (byteRate > 0 && dataSize > 0) (dataSize.toLong() * 1000 / byteRate) else 300L
+        } catch (_: Throwable) {
+            300L
+        }
     }
 
     /** Play the TPT. Returns the (estimated) duration in ms to wait before TX. */

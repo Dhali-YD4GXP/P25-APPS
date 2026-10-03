@@ -5,6 +5,7 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.LinearGradient
 import android.graphics.Paint
+import android.graphics.Path
 import android.graphics.RectF
 import android.graphics.Shader
 import android.graphics.Typeface
@@ -13,9 +14,12 @@ import android.view.View
 import kotlin.math.min
 
 /**
- * APX1000 radio skin. Drawn against a fixed 480x320 design surface and scaled
- * proportionally, so it renders correctly both on a 320x240 HT display and on
- * the top half of a large smartphone.
+ * APX1000 radio skin, styled after the reference LCD:
+ * light grey screen, bold black text, green signal/battery, orange status dot,
+ * and a dark soft-key bar (Chan / Scan / Cnts) in white.
+ *
+ * Drawn against a fixed 480x280 design surface and scaled proportionally, so it
+ * fits a small 320x240 HT display and the top half of a large smartphone.
  */
 class Apx1000View @JvmOverloads constructor(
     context: Context,
@@ -54,16 +58,17 @@ class Apx1000View @JvmOverloads constructor(
 
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        typeface = Typeface.MONOSPACE
+        typeface = BOLD
     }
     private val screenRect = RectF()
+    private val path = Path()
 
     private val backlightColor: Int
         get() = when (light) {
             Light.RX -> GREEN
             Light.TX -> YELLOW
             Light.INHIBIT -> RED
-            Light.IDLE -> AMBER
+            Light.IDLE -> BEZEL_EDGE
         }
 
     override fun onDraw(canvas: Canvas) {
@@ -77,48 +82,43 @@ class Apx1000View @JvmOverloads constructor(
         canvas.save()
         canvas.translate(ox, oy)
         canvas.scale(s, s)
-        drawBevel(canvas)
+        drawBezel(canvas)
         drawScreen(canvas)
         canvas.restore()
     }
 
-    private fun drawBevel(canvas: Canvas) {
+    private fun drawBezel(canvas: Canvas) {
         val r = RectF(0f, 0f, DESIGN_W, DESIGN_H)
-        paint.shader = LinearGradient(0f, 0f, 0f, DESIGN_H, BEVEL_TOP, BEVEL_BOTTOM, Shader.TileMode.CLAMP)
         paint.style = Paint.Style.FILL
-        canvas.drawRoundRect(r, 18f, 18f, paint)
+        paint.shader = LinearGradient(0f, 0f, 0f, DESIGN_H, BEZEL_TOP, BEZEL_BOTTOM, Shader.TileMode.CLAMP)
+        canvas.drawRoundRect(r, 16f, 16f, paint)
         paint.shader = null
-
         paint.style = Paint.Style.STROKE
         paint.strokeWidth = 3f
         paint.color = Color.parseColor("#0A0A0A")
-        canvas.drawRoundRect(r, 18f, 18f, paint)
+        canvas.drawRoundRect(r, 16f, 16f, paint)
     }
 
     private fun drawScreen(canvas: Canvas) {
         screenRect.set(SCREEN_INSET, SCREEN_INSET, DESIGN_W - SCREEN_INSET, DESIGN_H - SCREEN_INSET)
 
-        // Backlight glow around the display.
+        // Backlight glow + border keyed to RX/TX/Busy.
         paint.style = Paint.Style.STROKE
-        paint.strokeWidth = 8f
-        paint.color = withAlpha(backlightColor, 0x55)
-        canvas.drawRoundRect(screenRect, 10f, 10f, paint)
+        paint.strokeWidth = 10f
+        paint.color = withAlpha(backlightColor, 0x40)
+        canvas.drawRoundRect(screenRect, 8f, 8f, paint)
+        paint.strokeWidth = 4f
+        paint.color = backlightColor
+        canvas.drawRoundRect(screenRect, 8f, 8f, paint)
 
-        // Screen background.
+        // LCD background: light grey with a subtle vertical gradient.
         paint.style = Paint.Style.FILL
         paint.shader = LinearGradient(
             screenRect.left, screenRect.top, screenRect.left, screenRect.bottom,
-            Color.parseColor("#04170A"), Color.parseColor("#020B05"), Shader.TileMode.CLAMP
+            LCD_TOP, LCD_BOTTOM, Shader.TileMode.CLAMP
         )
-        canvas.drawRoundRect(screenRect, 10f, 10f, paint)
+        canvas.drawRoundRect(screenRect, 8f, 8f, paint)
         paint.shader = null
-
-        // Backlight border.
-        paint.style = Paint.Style.STROKE
-        paint.strokeWidth = 3f
-        paint.color = backlightColor
-        canvas.drawRoundRect(screenRect, 10f, 10f, paint)
-        paint.style = Paint.Style.FILL
 
         drawStatusBar(canvas)
         drawMainArea(canvas)
@@ -126,114 +126,160 @@ class Apx1000View @JvmOverloads constructor(
     }
 
     private fun drawStatusBar(canvas: Canvas) {
+        val left = screenRect.left + 14f
         val top = screenRect.top + 12f
-        val textColor = backlightColor
+
+        // Left tick.
+        paint.color = GREEN
+        paint.style = Paint.Style.FILL
+        canvas.drawRect(left, top + 10f, left + 3f, top + 40f, paint)
 
         // Signal bars.
-        val barW = 5f
+        val barW = 8f
+        val gap = 5f
+        val baseY = top + 40f
+        val heights = floatArrayOf(14f, 22f, 30f, 38f)
         for (i in 0 until 4) {
-            val h = 6f + i * 5f
-            val left = screenRect.left + 16f + i * (barW + 4f)
-            paint.color = if (i < signalLevel) textColor else withAlpha(textColor, 0x33)
-            canvas.drawRect(left, top + (20f - h), left + barW, top + 20f, paint)
+            val bx = left + 9f + i * (barW + gap)
+            paint.color = if (i < signalLevel) GREEN else withAlpha(GREEN, 0x33)
+            canvas.drawRect(bx, baseY - heights[i], bx + barW, baseY, paint)
+            paint.style = Paint.Style.STROKE
+            paint.strokeWidth = 1.5f
+            paint.color = withAlpha(Color.BLACK, 0x55)
+            canvas.drawRect(bx, baseY - heights[i], bx + barW, baseY, paint)
+            paint.style = Paint.Style.FILL
         }
 
-        // Network label.
-        textPaint.color = withAlpha(textColor, 0xCC)
-        textPaint.textSize = 14f
-        textPaint.typeface = Typeface.MONOSPACE
-        canvas.drawText(statusText, screenRect.left + 54f, top + 19f, textPaint)
+        // Transmit/grant triangle.
+        val tx = left + 9f + 4f * (barW + gap) + 6f
+        path.reset()
+        path.moveTo(tx, baseY - 34f)
+        path.lineTo(tx + 20f, baseY - 17f)
+        path.lineTo(tx, baseY)
+        path.close()
+        paint.color = if (light == Light.IDLE) TEXT else backlightColor
+        canvas.drawPath(path, paint)
+
+        // Center cluster: zone label + orange status dot + channel icon.
+        textPaint.typeface = BOLD
+        textPaint.textSize = 34f
+        textPaint.color = TEXT
+        val zoneText = zone
+        val zw = textPaint.measureText(zoneText)
+        val iconW = 40f
+        val groupW = zw + 14f + iconW
+        var gx = screenRect.centerX() - groupW / 2f
+        canvas.drawText(zoneText, gx, top + 38f, textPaint)
+        gx += zw + 6f
+        paint.color = ORANGE
+        canvas.drawCircle(gx + 4f, top + 30f, 5.5f, paint)
+        gx += 14f
+        drawChannelIcon(canvas, gx, top + 12f, top + 42f)
 
         // Battery.
-        val batRight = screenRect.right - 16f
-        val batW = 34f
-        val batH = 16f
-        val batTop = top + 3f
+        val batW = 40f
+        val batH = 24f
+        val batRight = screenRect.right - 14f
+        val batTop = top + 12f
         paint.style = Paint.Style.STROKE
-        paint.strokeWidth = 2f
-        paint.color = textColor
+        paint.strokeWidth = 2.5f
+        paint.color = TEXT
         canvas.drawRect(batRight - batW, batTop, batRight, batTop + batH, paint)
         paint.style = Paint.Style.FILL
-        canvas.drawRect(batRight, batTop + batH / 2f - 3f, batRight + 4f, batTop + batH / 2f + 3f, paint)
-        val fillW = (batW - 6f) * batteryPct / 100f
-        paint.color = if (batteryPct <= 15) RED else textColor
-        canvas.drawRect(batRight - batW + 3f, batTop + 3f, batRight - batW + 3f + fillW, batTop + batH - 3f, paint)
+        canvas.drawRect(batRight, batTop + batH / 2f - 4f, batRight + 5f, batTop + batH / 2f + 4f, paint)
+        val fillW = (batW - 8f) * batteryPct / 100f
+        paint.color = if (batteryPct <= 15) RED else GREEN
+        canvas.drawRect(batRight - batW + 4f, batTop + 4f, batRight - batW + 4f + fillW, batTop + batH - 4f, paint)
+    }
 
-        textPaint.textSize = 12f
-        textPaint.color = withAlpha(textColor, 0xCC)
-        canvas.drawText("$batteryPct%", batRight - batW - 42f, batTop + 13f, textPaint)
+    private fun drawChannelIcon(canvas: Canvas, x: Float, top: Float, bottom: Float) {
+        paint.style = Paint.Style.STROKE
+        paint.strokeWidth = 3f
+        paint.color = TEXT
+        canvas.drawLine(x, top, x, bottom, paint)
+        canvas.drawLine(x + 30f, top, x + 30f, bottom, paint)
+        val midY = (top + bottom) / 2f
+        canvas.drawLine(x + 3f, midY, x + 27f, midY, paint)
+        path.reset()
+        path.moveTo(x + 3f, midY)
+        path.lineTo(x + 10f, midY - 6f)
+        path.moveTo(x + 3f, midY)
+        path.lineTo(x + 10f, midY + 6f)
+        path.moveTo(x + 27f, midY)
+        path.lineTo(x + 20f, midY - 6f)
+        path.moveTo(x + 27f, midY)
+        path.lineTo(x + 20f, midY + 6f)
+        canvas.drawPath(path, paint)
+        paint.style = Paint.Style.FILL
     }
 
     private fun drawMainArea(canvas: Canvas) {
-        val textColor = backlightColor
+        // Brand line.
+        textPaint.typeface = BOLD
+        textPaint.textSize = 32f
+        textPaint.color = TEXT
+        val brand = "MOTOROLA P25"
+        canvas.drawText(brand, screenRect.centerX() - textPaint.measureText(brand) / 2f, screenRect.top + 100f, textPaint)
 
-        // Zone (top left of main area).
-        textPaint.typeface = Typeface.MONOSPACE
-        textPaint.textSize = 16f
-        textPaint.color = withAlpha(textColor, 0xAA)
-        canvas.drawText(zone, screenRect.left + 18f, screenRect.top + 66f, textPaint)
-
-        // TX/RX/status tag (top right).
-        val tag = when (light) {
-            Light.TX -> "TX"
-            Light.RX -> "RX"
-            Light.INHIBIT -> "BUSY"
-            Light.IDLE -> "IDLE"
+        // Channel / talkgroup (large).
+        textPaint.textSize = 64f
+        textPaint.color = TEXT
+        val ch = channel
+        var chW = textPaint.measureText(ch)
+        while (chW > screenRect.width() - 24f && textPaint.textSize > 28f) {
+            textPaint.textSize -= 2f
+            chW = textPaint.measureText(ch)
         }
-        textPaint.textSize = 16f
-        textPaint.color = textColor
-        val tagW = textPaint.measureText(tag)
-        canvas.drawText(tag, screenRect.right - 18f - tagW, screenRect.top + 66f, textPaint)
+        canvas.drawText(ch, screenRect.centerX() - chW / 2f, screenRect.top + 166f, textPaint)
 
-        // Channel / talkgroup (large, centered).
-        textPaint.typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
-        textPaint.textSize = 42f
-        textPaint.color = textColor
-        val chW = textPaint.measureText(channel)
-        canvas.drawText(channel, screenRect.centerX() - chW / 2f, screenRect.top + 132f, textPaint)
-
-        // Speaker / operator ID line. RX mandates the exact "ID : XXXX" format.
+        // Speaker / operator ID line (RX mandates the exact "ID : XXXX" format).
         val idLine = when {
             light == Light.RX && speakerId != null -> "ID : $speakerId"
             speakerId != null -> "ID : $speakerId"
             else -> "ID : $unitId"
         }
-        textPaint.typeface = Typeface.MONOSPACE
-        textPaint.textSize = 26f
+        textPaint.textSize = 30f
         textPaint.color = when {
-            light == Light.RX -> GREEN
+            light == Light.RX -> GREEN_DARK
             light == Light.INHIBIT -> RED
-            else -> withAlpha(textColor, 0xDD)
+            else -> TEXT
         }
-        val idW = textPaint.measureText(idLine)
-        canvas.drawText(idLine, screenRect.centerX() - idW / 2f, screenRect.top + 178f, textPaint)
+        canvas.drawText(idLine, screenRect.centerX() - textPaint.measureText(idLine) / 2f, screenRect.top + 204f, textPaint)
     }
 
     private fun drawSoftkeys(canvas: Canvas) {
-        val labels = SOFTKEYS
-        val y = screenRect.bottom - 46f
-        val gap = 10f
-        val totalW = screenRect.width() - 32f
-        val keyW = (totalW - gap * (labels.size - 1)) / labels.size
-        val textColor = backlightColor
+        val barTop = screenRect.bottom - 50f
+        val bar = RectF(screenRect.left, barTop, screenRect.right, screenRect.bottom)
 
-        labels.forEachIndexed { i, label ->
-            val left = screenRect.left + 16f + i * (keyW + gap)
-            val rect = RectF(left, y, left + keyW, y + 34f)
-            val selected = i == softkeyHighlight
-            paint.color = if (selected) withAlpha(textColor, 0x40) else withAlpha(Color.WHITE, 0x10)
-            canvas.drawRoundRect(rect, 6f, 6f, paint)
-            paint.style = Paint.Style.STROKE
-            paint.strokeWidth = 1.5f
-            paint.color = withAlpha(textColor, if (selected) 0xFF else 0x66)
-            canvas.drawRoundRect(rect, 6f, 6f, paint)
-            paint.style = Paint.Style.FILL
+        paint.style = Paint.Style.FILL
+        paint.color = SOFT_BG
+        canvas.drawRoundRect(bar, 8f, 8f, paint)
+        // cover top rounded corners to square off the join with the screen
+        canvas.drawRect(screenRect.left, barTop, screenRect.right, barTop + 8f, paint)
 
-            textPaint.typeface = Typeface.MONOSPACE
-            textPaint.textSize = 18f
-            textPaint.color = textColor
-            val w = textPaint.measureText(label)
-            canvas.drawText(label, rect.centerX() - w / 2f, rect.centerY() + 6f, textPaint)
+        paint.color = SOFT_DIV
+        paint.strokeWidth = 2f
+        canvas.drawLine(screenRect.left, barTop, screenRect.right, barTop, paint)
+
+        val cells = SOFTKEYS.size
+        val cellW = bar.width() / cells
+        textPaint.typeface = BOLD
+        textPaint.textSize = 28f
+        for (i in 0 until cells) {
+            val cx0 = screenRect.left + i * cellW
+            if (i > 0) {
+                paint.color = SOFT_DIV
+                paint.strokeWidth = 2f
+                canvas.drawLine(cx0, barTop, cx0, screenRect.bottom, paint)
+            }
+            if (i == softkeyHighlight) {
+                paint.color = SOFT_HILITE
+                canvas.drawRect(cx0 + 2f, barTop + 2f, cx0 + cellW - 2f, screenRect.bottom - 2f, paint)
+            }
+            textPaint.color = SOFT_TEXT
+            val label = SOFTKEYS[i]
+            val tw = textPaint.measureText(label)
+            canvas.drawText(label, cx0 + cellW / 2f - tw / 2f, bar.centerY() + 10f, textPaint)
         }
     }
 
@@ -242,17 +288,29 @@ class Apx1000View @JvmOverloads constructor(
 
     companion object {
         const val DESIGN_W = 480f
-        const val DESIGN_H = 320f
+        const val DESIGN_H = 280f
         private const val SCREEN_INSET = 16f
 
         private val SOFTKEYS = arrayOf("Chan", "Scan", "Cnts")
+        private val BOLD: Typeface = Typeface.create("sans-serif-condensed", Typeface.BOLD)
 
-        val AMBER = Color.parseColor("#FFB000")
-        val GREEN = Color.parseColor("#39FF6A")
-        val YELLOW = Color.parseColor("#FFD400")
-        val RED = Color.parseColor("#FF3B30")
+        private val LCD_TOP = Color.parseColor("#EFEFEF")
+        private val LCD_BOTTOM = Color.parseColor("#D8D8D8")
+        private val TEXT = Color.parseColor("#111111")
 
-        private val BEVEL_TOP = Color.parseColor("#3A3F44")
-        private val BEVEL_BOTTOM = Color.parseColor("#1B1E21")
+        private val GREEN = Color.parseColor("#3E9E43")
+        private val GREEN_DARK = Color.parseColor("#2E7D33")
+        private val YELLOW = Color.parseColor("#E0A000")
+        private val RED = Color.parseColor("#D0342C")
+        private val ORANGE = Color.parseColor("#E0A030")
+
+        private val SOFT_BG = Color.parseColor("#5B5B5B")
+        private val SOFT_HILITE = Color.parseColor("#737373")
+        private val SOFT_DIV = Color.parseColor("#2E2E2E")
+        private val SOFT_TEXT = Color.parseColor("#F0F0F0")
+
+        private val BEZEL_TOP = Color.parseColor("#3A3F44")
+        private val BEZEL_BOTTOM = Color.parseColor("#15181A")
+        private val BEZEL_EDGE = Color.parseColor("#7A7A7A")
     }
 }

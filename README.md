@@ -92,6 +92,17 @@ app/src/main/java/com/p25/apx1000/
 tools/                   host vocoder smoke test
 ```
 
+## Reference assets
+
+`references/` holds the operator-provided design references:
+
+- `UI_REF.png` — APX1000 LCD screenshot used to restyle `ui/Apx1000View.kt`
+  (light grey LCD, black bold text, green signal bars/battery, orange status
+  dot, dark `Chan`/`Scan`/`Cnts` soft-key bar).
+- `TPT_REF.mp3` — the Talk Permit Tone recording. It is decoded to 8 kHz mono,
+  silence-trimmed and normalised into `res/raw/tpt_p25.wav`. `TonePlayer` reads
+  its duration from the WAV header so TX waits exactly for the TPT.
+
 ## Licensing
 
 Codec 2 is licensed under the **GNU LGPL v2.1**; a copy is included at
