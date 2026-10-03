@@ -176,6 +176,7 @@ app.post('/api/channels/:code', requireAdmin, (req, res) => {
     ch.allowedIds = new Set(Array.isArray(req.body.allowedIds)
       ? req.body.allowedIds.map((s) => String(s).trim().toUpperCase()).filter(Boolean) : []);
   }
+  enforceChannelAccess(code);
   res.json(channelJson(ch));
 });
 
@@ -251,6 +252,23 @@ function broadcast(code, obj, except) {
   const payload = JSON.stringify(obj);
   for (const c of membersOf(code)) {
     if (c !== except && c.readyState === c.OPEN) c.send(payload);
+  }
+}
+
+function isAuthorized(code, unitId) {
+  const ch = channels.get(code);
+  if (!ch || !ch.secure) return true;
+  return (ch.allowedIds || new Set()).has(unitId);
+}
+
+// Kick any connected member of `code` who is no longer authorized.
+function enforceChannelAccess(code) {
+  for (const c of membersOf(code)) {
+    if (c.meta && !isAuthorized(code, c.meta.unitId)) {
+      c.meta.channel = null;
+      send(c, { type: 'error', message: 'removed from secured channel' });
+      broadcast(code, { type: 'member', action: 'leave', unitId: c.meta.unitId }, c);
+    }
   }
 }
 
@@ -349,8 +367,7 @@ function onJoin(ws, msg) {
   if (!code) return send(ws, { type: 'error', message: 'channel required' });
 
   // Secured channel: only allow-listed IDs may join.
-  const existing = channels.get(code);
-  if (existing && existing.secure && !(existing.allowedIds || new Set()).has(ws.meta.unitId)) {
+  if (!isAuthorized(code, ws.meta.unitId)) {
     console.log('[ws] join denied', ws.meta.unitId, code, '(secure)');
     return send(ws, { type: 'error', message: 'channel secured, ID not authorized' });
   }
@@ -376,6 +393,9 @@ function onJoin(ws, msg) {
 function onPtt(ws, msg) {
   const { unitId, channel } = ws.meta;
   if (!unitId || !channel) return send(ws, { type: 'error', message: 'join a channel first' });
+  if (!isAuthorized(channel, unitId)) {
+    return send(ws, { type: 'error', message: 'not authorized on this channel' });
+  }
   const floor = floors.get(channel) || { holder: null };
   floors.set(channel, floor);
   const state = msg.state === 'up' ? 'up' : 'down';

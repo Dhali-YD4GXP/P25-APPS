@@ -251,7 +251,11 @@ class PttService : Service(), PttEngine.Listener {
             engine?.decodeAndPlay(frame)
         }
 
-        override fun onError(message: String) = postToUi { it.onError(message) }
+        override fun onError(message: String) {
+            pendingTx = false
+            mainHandler.removeCallbacks(floorTimeout)
+            postToUi { it.onError(message) }
+        }
     }
 
     // ---- PttEngine.Listener (called on worker threads) ------------------
