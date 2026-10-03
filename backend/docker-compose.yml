@@ -10,6 +10,9 @@ services:
       - "95:9500"
     environment:
       PORT: "9500"
+    volumes:
+      # Expose the debug APK for download at /p25.apk (read-only).
+      - ../app/build/outputs/apk/debug:/srv/apk:ro
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:9500/api/health"]
       interval: 30s
