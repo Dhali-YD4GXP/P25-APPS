@@ -61,6 +61,7 @@ class MainActivity : AppCompatActivity(), PttService.UiListener {
     private var networkLabel = "LTE"
     private var customPttKey = -1
     private var learningPtt = false
+    private var lightState = PttEngine.Light.IDLE
 
     private var codecMode = Codec2.MODE_1600
 
@@ -372,6 +373,7 @@ class MainActivity : AppCompatActivity(), PttService.UiListener {
     // ---- PttService.UiListener -----------------------------------------
 
     override fun onLight(light: PttEngine.Light) {
+        lightState = light
         binding.radioDisplay.light = when (light) {
             PttEngine.Light.RX -> com.p25.apx1000.ui.Apx1000View.Light.RX
             PttEngine.Light.TX -> com.p25.apx1000.ui.Apx1000View.Light.TX
@@ -379,6 +381,7 @@ class MainActivity : AppCompatActivity(), PttService.UiListener {
             PttEngine.Light.IDLE -> com.p25.apx1000.ui.Apx1000View.Light.IDLE
         }
         if (light == PttEngine.Light.IDLE) binding.radioDisplay.speakerId = null
+        updateStatus()
         updateFooter()
     }
 
@@ -409,8 +412,11 @@ class MainActivity : AppCompatActivity(), PttService.UiListener {
     }
 
     private fun updateStatus() {
-        val tx = service?.txFrames() ?: 0
-        binding.radioDisplay.statusText = if (busy) "TX $tx" else connDetail
+        binding.radioDisplay.statusText = when {
+            lightState == PttEngine.Light.TX -> "TX ${service?.txFrames() ?: 0}"
+            busy -> "BUSY"
+            else -> connDetail
+        }
     }
 
     // ---- Self-test (independent of the PTT service) ---------------------
