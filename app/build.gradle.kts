@@ -12,8 +12,8 @@ android {
         applicationId = "com.p25.apx1000"
         minSdk = 21
         targetSdk = 34
-        versionCode = 6
-        versionName = "1.4"
+        versionCode = 7
+        versionName = "1.5"
 
         externalNativeBuild {
             cmake {
