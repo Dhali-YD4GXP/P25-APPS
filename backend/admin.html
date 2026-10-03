@@ -39,7 +39,7 @@
     <div><span id="ver"></span> <button class="del" onclick="logout()">Logout</button></div>
   </div>
 
-  <h2>Live Channel Activity</h2>
+  <h2>Live Channel Activity <button class="del sm" onclick="clearLog()">Clear log</button></h2>
   <table id="act"><thead><tr><th>ID</th><th>Username</th><th>Channel</th><th>Mulai</th><th>Durasi</th></tr></thead><tbody></tbody></table>
 
   <h2>Channels</h2>
@@ -119,8 +119,8 @@ async function refresh(){
   try{
     const a = await j('/api/activity');
     const tb = $('act').tBodies[0]; tb.innerHTML='';
-    const rows = (a.active||[]).map(x=>[x.unitId,x.username,x.channel,new Date(x.start).toLocaleTimeString(),'<span class="txing">TXING</span>'])
-      .concat((a.history||[]).map(x=>[x.unitId,x.username,x.channel,new Date(x.start).toLocaleTimeString(),ms(x.durationMs)]));
+    const rows = (a.active||[]).map(x=>[x.unitId,x.username,x.channelName||x.channel,new Date(x.start).toLocaleTimeString(),'<span class="txing">TXING</span>'])
+      .concat((a.history||[]).map(x=>[x.unitId,x.username,x.channelName||x.channel,new Date(x.start).toLocaleTimeString(),ms(x.durationMs)]));
     rows.forEach(r=>{ const tr=tb.insertRow(); r.forEach(c=>{const td=tr.insertCell(); td.innerHTML=c;}); });
   }catch(e){}
   try{
@@ -141,6 +141,11 @@ async function refresh(){
 }
 
 function ms(d){ if(d==null) return ''; const s=Math.round(d/1000); return s>=60 ? Math.floor(s/60)+'m'+s%60+'s' : s+'s'; }
+
+async function clearLog(){
+  await j('/api/activity', {method:'DELETE'});
+  refresh();
+}
 
 async function addChannel(){
   const body = { nameOrCode: $('f_name').value.trim() };

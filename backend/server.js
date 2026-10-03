@@ -199,11 +199,26 @@ app.get('/api/version', (req, res) => {
 });
 
 // Channel TX activity for the admin terminal.
+function channelLabel(code) {
+  const c = channels.get(code);
+  return (c && (c.alias || c.name)) || code;
+}
+
+function enrich(e) {
+  return Object.assign({}, e, { channelName: channelLabel(e.channel) });
+}
+
 app.get('/api/activity', requireAdmin, (req, res) => {
   res.json({
-    active: [...activeTx.values()],
-    history: activity.slice(0, 100),
+    active: [...activeTx.values()].map(enrich),
+    history: activity.slice(0, 100).map(enrich),
   });
+});
+
+app.delete('/api/activity', requireAdmin, (req, res) => {
+  activity.length = 0;
+  console.log('[act] cleared');
+  res.json({ ok: true });
 });
 
 app.get('/admin', (req, res) => {
