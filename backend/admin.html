@@ -15,48 +15,110 @@
   input,button{background:#161a1d;color:#e8e8e8;border:1px solid #444;padding:6px 8px;margin:2px 0;border-radius:4px}
   button{background:#2a6b2f;border:none;cursor:pointer}
   button.del{background:#8a2f2a}
+  button.sm{padding:2px 6px;font-size:12px}
   .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
   code{color:#ffb000}
+  .modal{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none;align-items:center;justify-content:center}
+  .modal .box{background:#14181b;border:1px solid #444;border-radius:8px;padding:16px;min-width:320px;max-width:90vw}
+  .chip{display:inline-flex;align-items:center;gap:6px;background:#1f2a21;border:1px solid #3a5a3d;border-radius:12px;padding:3px 8px;margin:2px}
+  .chip button{background:transparent;border:none;color:#ff8b86;cursor:pointer;padding:0}
+  #login{max-width:360px;margin:60px auto;text-align:center}
 </style>
 </head>
 <body>
-<h1>P25 Admin Terminal</h1>
-<div id="ver"></div>
+<div id="login">
+  <h1>P25 Admin Terminal</h1>
+  <input id="pw" type="password" placeholder="Admin password" style="width:100%">
+  <button onclick="login()" style="width:100%">Login</button>
+  <div id="loginerr" style="color:#ff8b86"></div>
+</div>
 
-<h2>Live Channel Activity</h2>
-<table id="act">
-  <thead><tr><th>ID</th><th>Username</th><th>Channel</th><th>Mulai</th><th>Durasi</th></tr></thead>
-  <tbody></tbody>
-</table>
+<div id="main" style="display:none">
+  <div class="row" style="justify-content:space-between">
+    <h1>P25 Admin Terminal</h1>
+    <div><span id="ver"></span> <button class="del" onclick="logout()">Logout</button></div>
+  </div>
 
-<h2>Channels</h2>
-<table id="ch">
-  <thead><tr><th>Code</th><th>Alias</th><th>Secure</th><th>Allowed IDs</th><th></th></tr></thead>
-  <tbody></tbody>
-</table>
+  <h2>Live Channel Activity</h2>
+  <table id="act"><thead><tr><th>ID</th><th>Username</th><th>Channel</th><th>Mulai</th><th>Durasi</th></tr></thead><tbody></tbody></table>
 
-<h2>Add Channel</h2>
-<div class="row">
-  <input id="f_name" placeholder="Name or code (e.g. P25-CH-8891)">
-  <input id="f_alias" placeholder="Alias (tampil di layar)">
-  <label><input type="checkbox" id="f_secure"> Secure</label>
-  <input id="f_ids" placeholder="Allowed IDs (koma, utk secure)">
-  <button onclick="addChannel()">Add</button>
+  <h2>Channels</h2>
+  <table id="ch">
+    <thead><tr><th>Code</th><th>Alias</th><th>Secure</th><th>Allowed IDs</th><th>Actions</th></tr></thead>
+    <tbody></tbody>
+  </table>
+
+  <h2>Add Channel</h2>
+  <div class="row">
+    <input id="f_name" placeholder="Name or code (e.g. P25-CH-8891)">
+    <input id="f_alias" placeholder="Alias (tampil di layar)">
+    <label><input type="checkbox" id="f_secure"> Secure</label>
+    <button onclick="addChannel()">Add</button>
+  </div>
+</div>
+
+<div class="modal" id="idsmodal">
+  <div class="box">
+    <h2>Manage allowed IDs — <code id="ids_code"></code></h2>
+    <div id="ids_list" style="min-height:60px"></div>
+    <div class="row">
+      <input id="ids_input" placeholder="Unit ID (e.g. 1001)">
+      <button onclick="idsAdd()">Add</button>
+    </div>
+    <div class="row" style="margin-top:12px">
+      <button onclick="idsSave()">Save</button>
+      <button class="del" onclick="closeModal('idsmodal')">Close</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal" id="editmodal">
+  <div class="box">
+    <h2>Edit channel — <code id="edit_code"></code></h2>
+    <input id="edit_alias" placeholder="Alias" style="width:100%">
+    <label><input type="checkbox" id="edit_secure"> Secure</label>
+    <div class="row" style="margin-top:12px">
+      <button onclick="editSave()">Save</button>
+      <button class="del" onclick="closeModal('editmodal')">Close</button>
+    </div>
+  </div>
 </div>
 
 <script>
 const $ = id => document.getElementById(id);
-async function j(url, opts){ const r = await fetch(url, opts); return r.json(); }
+let token = localStorage.getItem('p25_token') || '';
+let editingCode = null;
+let idsWorking = [];
+
+function authHeaders(extra){ return Object.assign({'Content-Type':'application/json', 'x-admin-token': token}, extra||{}); }
+
+async function j(url, opts){
+  opts = opts || {};
+  opts.headers = opts.headers ? Object.assign(authHeaders(), opts.headers) : authHeaders();
+  const r = await fetch(url, opts);
+  if (r.status === 401) { logout(); throw new Error('unauthorized'); }
+  return r.json();
+}
+
+async function login(){
+  const r = await fetch('/api/admin/login', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({password:$('pw').value})});
+  const o = await r.json();
+  if (o.token) { token = o.token; localStorage.setItem('p25_token', token); $('login').style.display='none'; $('main').style.display='block'; refresh(); }
+  else { $('loginerr').textContent = 'Wrong password'; }
+}
+
+function logout(){ token=''; localStorage.removeItem('p25_token'); $('main').style.display='none'; $('login').style.display='block'; }
+
+function showMain(){
+  if (token) { $('login').style.display='none'; $('main').style.display='block'; refresh(); }
+  else $('login').style.display='block';
+}
 
 async function refresh(){
-  try{
-    const v = await j('/api/version');
-    $('ver').innerHTML = 'Server version: <code>'+v.versionName+'</code> (code '+v.versionCode+') · APK: <a style="color:#39ff6a" href="'+v.apkUrl+'">'+v.apkUrl+'</a>';
-  }catch(e){}
+  try{ const v = await fetch('/api/version').then(r=>r.json()); $('ver').innerHTML='<code>'+v.versionName+'</code> ('+v.versionCode+')'; }catch(e){}
   try{
     const a = await j('/api/activity');
-    const tb = $('act').tBodies[0];
-    tb.innerHTML = '';
+    const tb = $('act').tBodies[0]; tb.innerHTML='';
     const rows = (a.active||[]).map(x=>[x.unitId,x.username,x.channel,new Date(x.start).toLocaleTimeString(),'<span class="txing">TXING</span>'])
       .concat((a.history||[]).map(x=>[x.unitId,x.username,x.channel,new Date(x.start).toLocaleTimeString(),ms(x.durationMs)]));
     rows.forEach(r=>{ const tr=tb.insertRow(); r.forEach(c=>{const td=tr.insertCell(); td.innerHTML=c;}); });
@@ -66,10 +128,14 @@ async function refresh(){
     const tb = $('ch').tBodies[0]; tb.innerHTML='';
     c.channels.forEach(ch=>{
       const tr=tb.insertRow();
-      const cells=[ch.code, ch.alias||'-', ch.secure?'YA':'-', (ch.allowedIds||[]).join(', '), ''];
-      cells.forEach(x=>{const td=tr.insertCell(); td.textContent=x;});
-      const td=tr.cells[4];
-      td.innerHTML='<button class="del" onclick="delChannel(\''+ch.code+'\')">Hapus</button>';
+      tr.insertCell().textContent = ch.code;
+      tr.insertCell().textContent = ch.alias || '-';
+      tr.insertCell().textContent = ch.secure ? 'YA' : '-';
+      tr.insertCell().innerHTML = (ch.allowedIds||[]).map(id=>'<span class="chip">'+id+'</span>').join('') || '-';
+      const td=tr.insertCell();
+      td.innerHTML = '<button class="sm" onclick="openEdit(\''+ch.code+'\')">Edit</button> '+
+                     '<button class="sm" onclick="openIds(\''+ch.code+'\')">IDs</button> '+
+                     '<button class="sm del" onclick="delChannel(\''+ch.code+'\')">Hapus</button>';
     });
   }catch(e){}
 }
@@ -80,19 +146,67 @@ async function addChannel(){
   const body = { nameOrCode: $('f_name').value.trim() };
   const alias = $('f_alias').value.trim(); if(alias) body.alias = alias;
   body.secure = $('f_secure').checked;
-  if(body.secure){ body.allowedIds = $('f_ids').value.split(',').map(s=>s.trim().toUpperCase()).filter(Boolean); }
+  body.allowedIds = [];
   if(!body.nameOrCode){ alert('isi name/code'); return; }
-  await j('/api/channels', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+  const ch = await j('/api/channels', {method:'POST', body:JSON.stringify(body)});
+  $('f_name').value=''; $('f_alias').value='';
   refresh();
+  if (body.secure) openIds(ch.code);
 }
 
-async function delChannel(code){
-  await j('/api/channels/'+encodeURIComponent(code), {method:'DELETE'});
-  refresh();
+async function delChannel(code){ await j('/api/channels/'+encodeURIComponent(code), {method:'DELETE'}); refresh(); }
+
+function openEdit(code){
+  editingCode = code;
+  $('edit_code').textContent = code;
+  $('edit_secure').checked = false;
+  $('edit_alias').value = '';
+  j('/api/channels').then(c=>{
+    const ch = (c.channels||[]).find(x=>x.code===code);
+    if(ch){ $('edit_alias').value = ch.alias||''; $('edit_secure').checked = !!ch.secure; }
+  });
+  $('editmodal').style.display='flex';
 }
 
-refresh();
-setInterval(refresh, 1000);
+async function editSave(){
+  await j('/api/channels/'+encodeURIComponent(editingCode), {method:'POST', body:JSON.stringify({alias:$('edit_alias').value.trim(), secure:$('edit_secure').checked})});
+  closeModal('editmodal'); refresh();
+}
+
+function openIds(code){
+  editingCode = code;
+  $('ids_code').textContent = code;
+  j('/api/channels').then(c=>{
+    const ch = (c.channels||[]).find(x=>x.code===code);
+    idsWorking = (ch && ch.allowedIds) ? ch.allowedIds.slice() : [];
+    renderIds();
+  });
+  $('idsmodal').style.display='flex';
+}
+
+function renderIds(){
+  $('ids_list').innerHTML = idsWorking.map(id=>'<span class="chip">'+id+' <button onclick="idsRemove(\''+id+'\')">x</button></span>').join('') || '<span style="color:#888">(kosong)</span>';
+}
+
+function idsAdd(){
+  const v = $('ids_input').value.trim().toUpperCase();
+  if(!v) return;
+  if(!idsWorking.includes(v)) idsWorking.push(v);
+  $('ids_input').value='';
+  renderIds();
+}
+
+function idsRemove(id){ idsWorking = idsWorking.filter(x=>x!==id); renderIds(); }
+
+async function idsSave(){
+  await j('/api/channels/'+encodeURIComponent(editingCode), {method:'POST', body:JSON.stringify({allowedIds: idsWorking})});
+  closeModal('idsmodal'); refresh();
+}
+
+function closeModal(id){ $(id).style.display='none'; }
+
+showMain();
+setInterval(()=>{ if(token) refresh(); }, 1000);
 </script>
 </body>
 </html>

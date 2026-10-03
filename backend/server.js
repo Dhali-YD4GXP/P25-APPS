@@ -22,6 +22,8 @@ const { WebSocketServer } = require('ws');
 
 const PORT = parseInt(process.env.PORT || '9500', 10);
 const HOST = process.env.HOST || '0.0.0.0';
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'p25admin';
+const adminTokens = new Set();
 
 // ---------------------------------------------------------------------------
 // State (in-memory PoC store)
@@ -53,10 +55,27 @@ app.use((req, res, next) => {
 });
 app.use((req, res, next) => {
   res.set('Access-Control-Allow-Origin', '*');
-  res.set('Access-Control-Allow-Headers', 'Content-Type');
-  res.set('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
+  res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-admin-token');
+  res.set('Access-Control-Allow-Methods', 'GET,POST,DELETE,OPTIONS');
   if (req.method === 'OPTIONS') return res.sendStatus(204);
   next();
+});
+
+// ---- Admin auth -----------------------------------------------------------
+function requireAdmin(req, res, next) {
+  const h = req.headers['authorization'] || '';
+  const token = h.startsWith('Bearer ') ? h.slice(7) : (req.headers['x-admin-token'] || '');
+  if (token && adminTokens.has(token)) return next();
+  res.status(401).json({ error: 'unauthorized' });
+}
+
+app.post('/api/admin/login', (req, res) => {
+  if (String(req.body && req.body.password) === ADMIN_PASSWORD) {
+    const token = crypto.randomBytes(16).toString('hex');
+    adminTokens.add(token);
+    return res.json({ token });
+  }
+  res.status(401).json({ error: 'wrong password' });
 });
 
 app.get('/', (req, res) => {
@@ -119,13 +138,13 @@ function channelJson(c) {
   };
 }
 
-app.get('/api/channels', (req, res) => {
+app.get('/api/channels', requireAdmin, (req, res) => {
   res.json({ channels: [...channels.values()].map(channelJson) });
 });
 
 // Add a channel. Generates a unique code when a name is given; admin may set
 // an alias (shown on the radio UI) and mark it secure with an ID allowlist.
-app.post('/api/channels', (req, res) => {
+app.post('/api/channels', requireAdmin, (req, res) => {
   const raw = String((req.body && req.body.nameOrCode) || '').trim();
   if (!raw) return res.status(400).json({ error: 'nameOrCode is required' });
   const isCode = /^P25-CH-\d{3,6}$/i.test(raw);
@@ -147,7 +166,7 @@ app.post('/api/channels', (req, res) => {
   res.status(201).json(channelJson(ch));
 });
 
-app.post('/api/channels/:code', (req, res) => {
+app.post('/api/channels/:code', requireAdmin, (req, res) => {
   const code = String(req.params.code).toUpperCase();
   const ch = channels.get(code);
   if (!ch) return res.status(404).json({ error: 'channel not found' });
@@ -160,7 +179,7 @@ app.post('/api/channels/:code', (req, res) => {
   res.json(channelJson(ch));
 });
 
-app.delete('/api/channels/:code', (req, res) => {
+app.delete('/api/channels/:code', requireAdmin, (req, res) => {
   const code = String(req.params.code).toUpperCase();
   if (!channels.delete(code)) return res.status(404).json({ error: 'channel not found' });
   floors.delete(code);
@@ -180,7 +199,7 @@ app.get('/api/version', (req, res) => {
 });
 
 // Channel TX activity for the admin terminal.
-app.get('/api/activity', (req, res) => {
+app.get('/api/activity', requireAdmin, (req, res) => {
   res.json({
     active: [...activeTx.values()],
     history: activity.slice(0, 100),

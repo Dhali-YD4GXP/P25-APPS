@@ -10,6 +10,7 @@ services:
       - "95:9500"
     environment:
       PORT: "9500"
+      ADMIN_PASSWORD: "p25admin"
     volumes:
       # Expose the debug APK for download at /p25.apk (read-only).
       - ../app/build/outputs/apk/debug:/srv/apk:ro
