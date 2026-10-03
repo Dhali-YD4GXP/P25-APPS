@@ -178,11 +178,12 @@ class SignalingClient(
         }
 
         override fun onClosed(ws: WebSocket, code: Int, reason: String) {
-            onDown("closed $code $reason")
+            onDown("closed $code")
         }
 
         override fun onFailure(ws: WebSocket, t: Throwable, response: Response?) {
-            onDown(t.message ?: "failure")
+            val msg = t.javaClass.simpleName + (t.message?.let { ": ${it.take(60)}" } ?: "")
+            onDown(msg)
         }
 
         private fun onDown(reason: String) {

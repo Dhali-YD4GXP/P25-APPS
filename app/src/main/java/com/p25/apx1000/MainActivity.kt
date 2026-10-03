@@ -48,6 +48,8 @@ class MainActivity : AppCompatActivity(), PttService.UiListener {
     private var busy = false
     private var online = false
     private var softkeyIndex = 0
+    private var connDetail = "READY"
+    private var networkLabel = "LTE"
 
     private var codecMode = Codec2.MODE_1600
 
@@ -346,19 +348,25 @@ class MainActivity : AppCompatActivity(), PttService.UiListener {
 
     override fun onBusy(busy: Boolean) {
         this.busy = busy
-        binding.radioDisplay.statusText = if (busy) "BUSY" else networkLabel
+        updateStatus()
         updateFooter()
     }
 
     override fun onError(message: String) {
-        binding.radioDisplay.statusText = "ERR"
+        connDetail = "ERR ${message.take(18)}"
+        updateStatus()
         Toast.makeText(this, message, Toast.LENGTH_LONG).show()
     }
 
     override fun onConnection(connected: Boolean, detail: String) {
         online = connected
-        binding.radioDisplay.statusText = if (connected) detail else "OFFLINE"
+        connDetail = if (connected) detail else "OFF $detail"
+        updateStatus()
         updateFooter()
+    }
+
+    private fun updateStatus() {
+        binding.radioDisplay.statusText = if (busy) "BUSY" else connDetail
     }
 
     // ---- Hardware keys (works with no touch screen) ---------------------
@@ -426,8 +434,6 @@ class MainActivity : AppCompatActivity(), PttService.UiListener {
 
     // ---- Signal / battery ----------------------------------------------
 
-    private var networkLabel = "LTE"
-
     private fun updateSignalAndNetwork() {
         try {
             var online = false
@@ -462,10 +468,6 @@ class MainActivity : AppCompatActivity(), PttService.UiListener {
                 isCell -> "LTE"
                 online -> "NET"
                 else -> "NO SIG"
-            }
-            // Do not clobber the ONLINE/OFFLINE/ERR status set elsewhere.
-            if (!busy && service?.isOnline() != true) {
-                binding.radioDisplay.statusText = networkLabel
             }
         } catch (_: Throwable) {
             binding.radioDisplay.signalLevel = 0

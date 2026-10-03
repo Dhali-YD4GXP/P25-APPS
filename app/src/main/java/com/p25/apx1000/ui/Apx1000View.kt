@@ -232,7 +232,15 @@ class Apx1000View @JvmOverloads constructor(
         // Connection / network status, always visible.
         textPaint.typeface = BOLD
         textPaint.textSize = 22f
-        textPaint.color = if (statusText.contains("ONLINE", ignoreCase = true)) GREEN_DARK else TEXT
+        while (textPaint.measureText(statusText) > screenRect.width() - 20f && textPaint.textSize > 11f) {
+            textPaint.textSize -= 1f
+        }
+        textPaint.color = when {
+            statusText.contains("ONLINE", ignoreCase = true) -> GREEN_DARK
+            statusText.startsWith("OFF") || statusText.contains("ERR", ignoreCase = true) -> RED
+            statusText.contains("BUSY", ignoreCase = true) -> ORANGE
+            else -> TEXT
+        }
         canvas.drawText(statusText, screenRect.centerX() - textPaint.measureText(statusText) / 2f, screenRect.top + 74f, textPaint)
 
         // Zone label (always visible).
