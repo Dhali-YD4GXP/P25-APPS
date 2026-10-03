@@ -285,6 +285,8 @@ class MainActivity : AppCompatActivity(), PttService.UiListener {
             service?.setChannelBusy(busy)
         }
         binding.btnMode.setOnClickListener { showModeDialog() }
+        binding.btnScan.setOnClickListener { toggleScan() }
+        binding.btnMenu.setOnClickListener { showOptionsDialog() }
         binding.btnLogout.setOnClickListener { logout() }
     }
 
