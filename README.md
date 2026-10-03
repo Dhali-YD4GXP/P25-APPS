@@ -99,9 +99,43 @@ Codec 2 is licensed under the **GNU LGPL v2.1**; a copy is included at
 into the app as a shared library, the LGPL relinking obligations are satisfied
 by shipping the unmodified sources in this repository.
 
+## Backend (signaling + floor control)
+
+`backend/` is a small Node.js server (Express + `ws`) providing:
+
+- REST: `GET /api/health`, `POST /api/auth/signup`, `POST /api/auth/login`,
+  `GET|POST /api/channels`.
+- WebSocket `/ws`: `hello` / `join` / `ptt` / `ping` control messages, plus
+  opaque **binary Codec 2 frame relay** between talkgroup members. Floor control
+  grants the channel to one speaker at a time; others get `reason: "occupied"`.
+
+Audio frames are never decoded server-side (the Android app already does that).
+
+Run it (host port **95** maps to container 9500; Docker's root daemon performs
+the privileged bind, so no sudo is needed):
+
+```bash
+cd backend
+docker compose up -d --build
+curl http://localhost:95/api/health
+```
+
+### Cloudflare Tunnel
+
+The server already runs a token-managed tunnel (`cloudflared.service`,
+tunnel id `65303f17-8921-4e04-b409-ccb7dfafa3e8`). In **Cloudflare Zero Trust →
+Networks → Tunnels →** that tunnel → **Public Hostname → Add**:
+
+- Subdomain/host: `p25.domainanda.com`
+- Type: `HTTP`
+- URL: `localhost:95`
+
+WebSocket (`wss://p25.domainanda.com/ws`) works over the same HTTP hostname.
+
 ## Next steps
 
-- WebSocket/`Transport` uplink to the Ubuntu signaling + floor-control server
-  (hook: `PttService.setFrameSink`).
-- Cloudflare Tunnel (`cloudflared`) exposing REST/WSS.
-- Real floor control replacing the local `setChannelBusy` simulation.
+- Wire the Android `Transport` to `/ws`: hook `PttService.setFrameSink` for TX
+  and `PttEngine.decodeAndPlay` for RX, with `setChannelBusy` driven by the
+  server's `floor` messages.
+- Replace the local address-book auth with the REST endpoints.
+

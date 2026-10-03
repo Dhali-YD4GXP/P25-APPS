@@ -1,0 +1,17 @@
+services:
+  p25-backend:
+    build: .
+    image: p25-apx1000-backend:latest
+    container_name: p25-backend
+    restart: unless-stopped
+    # Host port 95 (privileged) -> container 9500 (unprivileged app port).
+    # Docker's root daemon performs the privileged bind; no sudo needed.
+    ports:
+      - "95:9500"
+    environment:
+      PORT: "9500"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:9500/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
