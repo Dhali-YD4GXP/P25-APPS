@@ -17,7 +17,7 @@ import android.os.PowerManager
 import android.util.Log
 import android.view.KeyEvent
 import androidx.core.app.NotificationCompat
-import androidx.media.session.MediaSessionCompat
+import android.support.v4.media.session.MediaSessionCompat
 import com.p25.apx1000.MainActivity
 import com.p25.apx1000.R
 import com.p25.apx1000.audio.PttEngine
@@ -212,6 +212,7 @@ class PttService : Service(), PttEngine.Listener {
 
     companion object {
         private const val TAG = "PttService"
+        private const val WAKE_TAG = "P25Apx1000::PttWakeLock"
         private const val CHANNEL_ID = "p25_ptt"
         private const val NOTIF_ID = 0x25
 

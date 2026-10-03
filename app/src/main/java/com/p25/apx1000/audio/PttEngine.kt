@@ -198,7 +198,7 @@ class PttEngine(context: Context, private val listener: Listener) {
         }
 
         try {
-            rec.stopRecording()
+            rec.stop()
         } catch (_: Throwable) {
         }
     }
@@ -213,11 +213,11 @@ class PttEngine(context: Context, private val listener: Listener) {
             val frames = synchronized(lastTxFrames) { lastTxFrames.toList() }
             if (frames.isEmpty()) {
                 rxPlaying = false
-                return@Thread
+                return@Runnable
             }
             setLight(Light.RX)
             listener.onSpeaker(unitId)
-            val dec = rxDecoder ?: return@Thread
+            val dec = rxDecoder ?: return@Runnable
             for (f in frames) {
                 if (!rxPlaying) break
                 try {
