@@ -1,0 +1,27 @@
+<resources>
+    <string name="app_name">P25 APX1000</string>
+    <string name="brand">APX1000</string>
+    <string name="brand_sub">P25 PoC · Codec 2 Digital Voice</string>
+
+    <string name="hint_username">Username</string>
+    <string name="hint_password">Password</string>
+    <string name="hint_unit_id">Unit ID (e.g. 1001 / ALPHA)</string>
+    <string name="action_sign_in">Sign In</string>
+    <string name="action_sign_up">Sign Up</string>
+
+    <string name="ptt_label">PTT\nHOLD TO TALK</string>
+    <string name="action_add_channel">Chan +</string>
+    <string name="action_rx">RX</string>
+    <string name="action_busy">Busy</string>
+    <string name="action_mode">Mode</string>
+
+    <string name="notif_channel">PTT Service</string>
+    <string name="notif_text">P25 radio is active</string>
+
+    <string name="add_channel_title">Add Channel</string>
+    <string name="add_channel_hint">Name or code (e.g. P25-CH-8891)</string>
+    <string name="add_channel_ok">Add</string>
+    <string name="cancel">Cancel</string>
+
+    <string name="mode_title">Codec 2 bitrate</string>
+</resources>

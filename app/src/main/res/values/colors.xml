@@ -1,0 +1,10 @@
+<resources>
+    <color name="apx_amber">#FFB000</color>
+    <color name="apx_green">#39FF6A</color>
+    <color name="apx_yellow">#FFD400</color>
+    <color name="apx_red">#FF3B30</color>
+
+    <color name="panel_bg">#0B0E10</color>
+    <color name="panel_surface">#161A1D</color>
+    <color name="text_dim">#8A9299</color>
+</resources>

@@ -1,0 +1,1 @@
+-keep class com.p25.apx1000.audio.Codec2 { *; }
