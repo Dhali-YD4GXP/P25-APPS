@@ -226,14 +226,17 @@ class MainActivity : AppCompatActivity(), PttService.UiListener {
         handler.postDelayed({ runSelfTest() }, 1200)
     }
 
-    /** Device with a touch screen shows the skin + large touch PTT; PoC/HT does not. */
+    /** Hide the touch PTT pad on small (PoC/HT) screens; show it on phones. */
     private fun applyResponsiveLayout() {
-        val touch = packageManager.hasSystemFeature(PackageManager.FEATURE_TOUCHSCREEN)
-        val smallestDp = resources.configuration.smallestScreenWidthDp
+        val dm = resources.displayMetrics
+        val wIn = dm.widthPixels / dm.xdpi
+        val hIn = dm.heightPixels / dm.ydpi
+        val diagIn = Math.sqrt((wIn * wIn + hIn * hIn).toDouble()).toFloat()
+        val isPoc = diagIn < 3.5f
         val showPad = when (store.layoutMode) {
             1 -> true               // forced phone
             2 -> false              // forced PoC/keypad
-            else -> touch && smallestDp >= 320
+            else -> !isPoc          // auto: small diagonal => PoC
         }
         binding.pttPadWrap.visibility = if (showPad) View.VISIBLE else View.GONE
     }
@@ -352,7 +355,7 @@ class MainActivity : AppCompatActivity(), PttService.UiListener {
                 Toast.makeText(this, if (scanEnabled) "Scan ON" else "Scan OFF", Toast.LENGTH_SHORT).show()
                 updateFooter()
             }
-            2 -> showAddChannelDialog() // Cnts: add channel / contacts
+            2 -> showOptionsDialog() // Cnts: menu (has no dedicated MENU key on PoC)
         }
     }
 
@@ -547,10 +550,12 @@ class MainActivity : AppCompatActivity(), PttService.UiListener {
             KeyEvent.KEYCODE_DPAD_RIGHT -> if (down) moveSoftkey(1)
             KeyEvent.KEYCODE_DPAD_CENTER,
             KeyEvent.KEYCODE_ENTER,
-            KeyEvent.KEYCODE_NUMPAD_ENTER -> if (down) activateSoftkey(softkeyIndex)
+            KeyEvent.KEYCODE_NUMPAD_ENTER -> if (down) showOptionsDialog()
             KeyEvent.KEYCODE_SOFT_LEFT -> if (down) activateSoftkey(0)
             KeyEvent.KEYCODE_SOFT_RIGHT -> if (down) activateSoftkey(2)
-            KeyEvent.KEYCODE_MENU -> if (down) showOptionsDialog()
+            KeyEvent.KEYCODE_MENU,
+            KeyEvent.KEYCODE_STAR,
+            KeyEvent.KEYCODE_POUND -> if (down) showOptionsDialog()
             else -> return false
         }
         return true
