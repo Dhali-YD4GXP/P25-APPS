@@ -159,6 +159,10 @@ class MainActivity : AppCompatActivity(), PttService.UiListener {
 
     override fun onDestroy() {
         handler.removeCallbacksAndMessages(null)
+        if (isFinishing) {
+            service?.stopSelf()
+            service = null
+        }
         super.onDestroy()
     }
 

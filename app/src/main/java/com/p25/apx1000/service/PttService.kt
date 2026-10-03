@@ -92,7 +92,14 @@ class PttService : Service(), PttEngine.Listener {
 
     override fun onBind(intent: Intent?): IBinder = binder
 
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        Log.i(TAG, "task removed, stopping service")
+        stopSelf()
+        super.onTaskRemoved(rootIntent)
+    }
+
     override fun onDestroy() {
+        runCatching { stopForeground(true) }
         signaling?.disconnect()
         signaling = null
         engine?.release()
