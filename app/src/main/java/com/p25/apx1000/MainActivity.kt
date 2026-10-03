@@ -204,6 +204,12 @@ class MainActivity : AppCompatActivity(), PttService.UiListener {
         binding.radioDisplay.buildTag = "v${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})"
         applyChannel()
         applyResponsiveLayout()
+        // On a keypad-only PoC, ask for the side PTT key once so it can be learned.
+        val touch = packageManager.hasSystemFeature(PackageManager.FEATURE_TOUCHSCREEN)
+        if (!touch && customPttKey == -1) {
+            learningPtt = true
+            Toast.makeText(this, "Press the side PTT key once to set it up", Toast.LENGTH_LONG).show()
+        }
         // If the PTT service never binds, surface it instead of a silent READY.
         handler.postDelayed({
             if (service == null) {
