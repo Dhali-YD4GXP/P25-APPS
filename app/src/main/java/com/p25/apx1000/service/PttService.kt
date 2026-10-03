@@ -181,6 +181,10 @@ class PttService : Service(), PttEngine.Listener {
     }
 
     private val signalingListener = object : SignalingClient.Listener {
+        override fun onConnecting() {
+            postToUi { it.onConnection(false, "CONNECTING") }
+        }
+
         override fun onConnected() {
             postToUi { it.onConnection(true, "ONLINE") }
         }
@@ -189,7 +193,7 @@ class PttService : Service(), PttEngine.Listener {
             pendingTx = false
             mainHandler.removeCallbacks(floorTimeout)
             engine?.pttUp()
-            postToUi { it.onConnection(false, "OFFLINE") }
+            postToUi { it.onConnection(false, "OFF ${reason.take(40)}") }
         }
 
         override fun onJoined(channelName: String) {

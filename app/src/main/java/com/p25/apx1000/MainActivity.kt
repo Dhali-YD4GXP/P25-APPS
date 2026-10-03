@@ -76,6 +76,8 @@ class MainActivity : AppCompatActivity(), PttService.UiListener {
             service = local.service()
             service?.addUiListener(this@MainActivity)
             service?.setCodecMode(codecMode)
+            connDetail = "SERVICE OK"
+            updateStatus()
             pushChannelToService()
             updateFooter()
         }
@@ -360,7 +362,7 @@ class MainActivity : AppCompatActivity(), PttService.UiListener {
 
     override fun onConnection(connected: Boolean, detail: String) {
         online = connected
-        connDetail = if (connected) detail else "OFF $detail"
+        connDetail = detail
         updateStatus()
         updateFooter()
     }

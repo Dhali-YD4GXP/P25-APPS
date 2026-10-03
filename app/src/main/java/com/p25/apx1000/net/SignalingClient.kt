@@ -33,6 +33,7 @@ class SignalingClient(
 ) {
 
     interface Listener {
+        fun onConnecting()
         fun onConnected()
         fun onDisconnected(reason: String)
         fun onJoined(channelName: String)
@@ -116,10 +117,12 @@ class SignalingClient(
     private fun openSocket() {
         if (!wantConnected) return
         try {
+            listener.onConnecting()
             val request = Request.Builder().url(url).build()
             webSocket = client.newWebSocket(request, socketListener)
         } catch (t: Throwable) {
             Log.w(TAG, "newWebSocket failed", t)
+            listener.onDisconnected(t.javaClass.simpleName)
             scheduleRetry()
         }
     }

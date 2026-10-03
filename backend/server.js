@@ -39,7 +39,15 @@ function hashPassword(password, salt) {
 // REST API
 // ---------------------------------------------------------------------------
 const app = express();
+app.set('trust proxy', true);
 app.use(express.json());
+app.use((req, res, next) => {
+  const fwd = req.headers['x-forwarded-for'] || req.socket.remoteAddress || '';
+  const isLocalHealth = req.url === '/api/health' &&
+    /^(::1|127\.0\.0\.1|::ffff:127\.0\.0\.1)$/.test(req.socket.remoteAddress || '');
+  if (!isLocalHealth) console.log('[http]', req.method, req.url, '-', fwd);
+  next();
+});
 app.use((req, res, next) => {
   res.set('Access-Control-Allow-Origin', '*');
   res.set('Access-Control-Allow-Headers', 'Content-Type');
