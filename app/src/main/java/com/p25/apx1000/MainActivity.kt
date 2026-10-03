@@ -279,6 +279,8 @@ class MainActivity : AppCompatActivity(), PttService.UiListener {
         }
 
         binding.btnAddChannel.setOnClickListener { showAddChannelDialog() }
+        binding.btnChanPrev.setOnClickListener { cycleChannel(-1) }
+        binding.btnChanNext.setOnClickListener { cycleChannel(1) }
         binding.btnRx.setOnClickListener { service?.replayRx(REMOTE_ID) }
         binding.btnBusy.setOnClickListener {
             busy = !busy

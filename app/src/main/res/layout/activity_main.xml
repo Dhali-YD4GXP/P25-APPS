@@ -137,6 +137,20 @@
                 android:orientation="horizontal">
 
                 <Button
+                    android:id="@+id/btnChanPrev"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="@string/action_chan_prev" />
+
+                <Button
+                    android:id="@+id/btnChanNext"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="@string/action_chan_next" />
+
+                <Button
                     android:id="@+id/btnAddChannel"
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
@@ -149,20 +163,6 @@
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
                     android:text="@string/action_scan" />
-
-                <Button
-                    android:id="@+id/btnBusy"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:text="@string/action_busy" />
-
-                <Button
-                    android:id="@+id/btnRx"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:text="@string/action_rx" />
             </LinearLayout>
 
             <LinearLayout
@@ -170,6 +170,20 @@
                 android:layout_height="wrap_content"
                 android:layout_marginTop="6dp"
                 android:orientation="horizontal">
+
+                <Button
+                    android:id="@+id/btnRx"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="@string/action_rx" />
+
+                <Button
+                    android:id="@+id/btnBusy"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="@string/action_busy" />
 
                 <Button
                     android:id="@+id/btnMode"
@@ -184,14 +198,14 @@
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
                     android:text="@string/action_menu" />
-
-                <Button
-                    android:id="@+id/btnLogout"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:text="@string/action_logout" />
             </LinearLayout>
+
+            <Button
+                android:id="@+id/btnLogout"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:text="@string/action_logout" />
 
             <TextView
                 android:id="@+id/radioFooter"

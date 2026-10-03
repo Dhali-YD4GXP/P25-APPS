@@ -10,7 +10,9 @@
     <string name="action_sign_up">Sign Up</string>
 
     <string name="ptt_label">PTT\nHOLD TO TALK</string>
-    <string name="action_add_channel">Chan +</string>
+    <string name="action_add_channel">Add</string>
+    <string name="action_chan_prev">◀</string>
+    <string name="action_chan_next">▶</string>
     <string name="action_rx">RX</string>
     <string name="action_busy">Busy</string>
     <string name="action_mode">Mode</string>
