@@ -41,6 +41,7 @@ class UserStore(context: Context) {
         }
         accounts.add(Account(u, hash(password, id), id))
         saveAccounts(accounts)
+        setSession(u, id)
         return Result.Ok(id)
     }
 
