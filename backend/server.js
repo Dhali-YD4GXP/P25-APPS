@@ -49,7 +49,7 @@ app.use((req, res, next) => {
 });
 
 app.get('/', (req, res) => {
-  res.json({ service: 'p25-apx1000-backend', version: '1.0.0', endpoints: ['/api/health', '/api/auth/signup', '/api/auth/login', '/api/channels', '/ws', '/p25.apk'] });
+  res.json({ service: 'p25-apx1000-backend', version: '1.0.0', endpoints: ['/api/health', '/api/auth/signup', '/api/auth/login', '/api/channels', '/ws', '/p25.apk', '/apk', '/download'] });
 });
 
 app.get('/api/health', (req, res) => {
@@ -62,7 +62,8 @@ app.get('/api/health', (req, res) => {
 });
 
 // Download the latest debug APK (host build dir mounted read-only at /srv/apk).
-app.get('/p25.apk', (req, res) => {
+// Aliases so people don't have to remember the exact name.
+app.get(['/p25.apk', '/apk', '/download'], (req, res) => {
   res.download('/srv/apk/app-debug.apk', 'p25-apx1000.apk', (err) => {
     if (err && !res.headersSent) {
       res.status(404).json({ error: 'APK not available yet' });
