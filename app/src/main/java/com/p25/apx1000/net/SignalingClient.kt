@@ -80,7 +80,12 @@ class SignalingClient(
             webSocket = null
             isConnected = false
         }
-        openSocket()
+        // Avoid piling up sockets if connect() is called repeatedly.
+        if (webSocket == null) {
+            openSocket()
+        } else if (isConnected) {
+            send(JSONObject().put("type", "hello").put("unitId", this.unitId).put("channel", this.channel))
+        }
     }
 
     /** Join (or switch) a talkgroup channel on the current connection. */
