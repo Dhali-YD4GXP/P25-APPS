@@ -144,10 +144,11 @@ function broadcast(code, obj, except) {
   }
 }
 
-wss.on('connection', (ws) => {
+wss.on('connection', (ws, req) => {
   ws.meta = { unitId: null, channel: null };
   ws.isAlive = true;
   ws.on('pong', () => { ws.isAlive = true; });
+  console.log('[ws] connect', req && req.socket ? req.socket.remoteAddress : '');
 
   ws.on('message', (data, isBinary) => {
     // ---- binary: relayed Codec 2 voice frame ----
@@ -188,6 +189,7 @@ wss.on('connection', (ws) => {
   ws.on('close', () => {
     const { unitId, channel } = ws.meta;
     if (!unitId || !channel) return;
+    console.log('[ws] close', unitId, channel);
     const floor = floors.get(channel);
     if (floor && floor.holder === unitId) {
       floor.holder = null;
@@ -205,6 +207,7 @@ function onHello(ws, msg) {
   const unitId = String(msg.unitId || '').trim().toUpperCase();
   if (!unitId) return send(ws, { type: 'error', message: 'unitId required' });
   ws.meta.unitId = unitId;
+  console.log('[ws] hello', unitId);
   send(ws, { type: 'welcome', unitId, server: 'p25-apx1000' });
   if (msg.channel) onJoin(ws, { channel: msg.channel });
 }
@@ -221,6 +224,7 @@ function onJoin(ws, msg) {
   ws.meta.channel = code;
   if (!floors.has(code)) floors.set(code, { holder: null });
   if (!channels.has(code)) channels.set(code, { name: code, code, zone: 'ZONE 1' });
+  console.log('[ws] join', ws.meta.unitId, code);
 
   send(ws, {
     type: 'joined',
@@ -240,9 +244,11 @@ function onPtt(ws, msg) {
 
   if (state === 'down') {
     if (floor.holder && floor.holder !== unitId) {
+      console.log('[ws] ptt denied', unitId, channel, 'held by', floor.holder);
       return send(ws, { type: 'floor', busy: true, holder: floor.holder, reason: 'occupied', granted: false });
     }
     floor.holder = unitId;
+    console.log('[ws] ptt granted', unitId, channel);
     broadcast(channel, { type: 'floor', busy: true, holder: unitId, reason: 'granted', granted: true });
     broadcast(channel, { type: 'speaker', unitId }, ws);
     return;
@@ -251,6 +257,7 @@ function onPtt(ws, msg) {
   // state === 'up'
   if (floor.holder === unitId) {
     floor.holder = null;
+    console.log('[ws] ptt released', unitId, channel);
     broadcast(channel, { type: 'floor', busy: false, holder: null, reason: 'released' });
   }
 }

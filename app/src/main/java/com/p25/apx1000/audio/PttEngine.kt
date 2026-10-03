@@ -117,7 +117,7 @@ class PttEngine(context: Context, private val listener: Listener) {
             val trkBuf = maxOf(minTrk, frameBytes * 4)
             @Suppress("DEPRECATION")
             audioTrack = AudioTrack(
-                AudioManager.STREAM_VOICE_CALL,
+                AudioManager.STREAM_MUSIC,
                 SAMPLE_RATE,
                 AudioFormat.CHANNEL_OUT_MONO,
                 AudioFormat.ENCODING_PCM_16BIT,

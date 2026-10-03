@@ -229,12 +229,18 @@ class Apx1000View @JvmOverloads constructor(
     }
 
     private fun drawMainArea(canvas: Canvas) {
+        // Connection / network status, always visible.
+        textPaint.typeface = BOLD
+        textPaint.textSize = 22f
+        textPaint.color = if (statusText.contains("ONLINE", ignoreCase = true)) GREEN_DARK else TEXT
+        canvas.drawText(statusText, screenRect.centerX() - textPaint.measureText(statusText) / 2f, screenRect.top + 74f, textPaint)
+
         // Zone label (always visible).
         textPaint.typeface = BOLD
         textPaint.textSize = 30f
         textPaint.color = TEXT
         val z = "ZONE $zoneValue"
-        canvas.drawText(z, screenRect.centerX() - textPaint.measureText(z) / 2f, screenRect.top + 96f, textPaint)
+        canvas.drawText(z, screenRect.centerX() - textPaint.measureText(z) / 2f, screenRect.top + 100f, textPaint)
 
         // Channel / talkgroup (large).
         textPaint.textSize = 64f
