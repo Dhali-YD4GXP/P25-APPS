@@ -126,11 +126,12 @@ The server already runs a token-managed tunnel (`cloudflared.service`,
 tunnel id `65303f17-8921-4e04-b409-ccb7dfafa3e8`). In **Cloudflare Zero Trust →
 Networks → Tunnels →** that tunnel → **Public Hostname → Add**:
 
-- Subdomain/host: `p25.domainanda.com`
+- Subdomain/host: `p25.dhali.my.id`
 - Type: `HTTP`
 - URL: `localhost:95`
 
-WebSocket (`wss://p25.domainanda.com/ws`) works over the same HTTP hostname.
+WebSocket (`wss://p25.dhali.my.id/ws`) works over the same HTTP hostname.
+Verified live: `https://p25.dhali.my.id/api/health` → `200`.
 
 ## Next steps
 
