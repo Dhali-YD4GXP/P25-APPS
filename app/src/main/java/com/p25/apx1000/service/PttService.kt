@@ -68,12 +68,16 @@ class PttService : Service(), PttEngine.Listener {
 
     override fun onCreate() {
         super.onCreate()
-        createNotificationChannel()
-        startInForeground()
-        acquireWakeLock()
-        setupMediaSession()
-        engine = PttEngine(this, this).also { it.start() }
-        engine?.onFrameEncoded = { frame -> signaling?.sendFrame(frame) }
+        try {
+            createNotificationChannel()
+            startInForeground()
+            acquireWakeLock()
+            setupMediaSession()
+            engine = PttEngine(this, this).also { it.start() }
+            engine?.onFrameEncoded = { frame -> signaling?.sendFrame(frame) }
+        } catch (t: Throwable) {
+            Log.e(TAG, "onCreate failed", t)
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -103,7 +107,7 @@ class PttService : Service(), PttEngine.Listener {
     // ---- Public API used by the Activity --------------------------------
 
     fun addUiListener(l: UiListener) {
-        uiListeners.addIfAbsent(l)
+        uiListeners.add(l)
     }
 
     fun removeUiListener(l: UiListener) {

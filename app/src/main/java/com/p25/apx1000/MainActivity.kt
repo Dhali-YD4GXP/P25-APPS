@@ -189,8 +189,16 @@ class MainActivity : AppCompatActivity(), PttService.UiListener {
         binding.loginContainer.visibility = View.GONE
         binding.radioContainer.visibility = View.VISIBLE
         binding.radioDisplay.unitId = store.currentUnitId ?: "----"
+        binding.radioDisplay.buildTag = "v${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})"
         applyChannel()
         applyResponsiveLayout()
+        // If the PTT service never binds, surface it instead of a silent READY.
+        handler.postDelayed({
+            if (service == null) {
+                connDetail = "NO SERVICE"
+                updateStatus()
+            }
+        }, 2500)
     }
 
     /** HT (small) hides the touch PTT pad; phones show skin + large touch PTT. */
@@ -408,6 +416,7 @@ class MainActivity : AppCompatActivity(), PttService.UiListener {
 
     private fun showOptionsDialog() {
         val items = arrayOf(
+            "Reconnect",
             "Codec 2 bitrate",
             "Toggle channel busy",
             "Replay last RX",
@@ -418,14 +427,20 @@ class MainActivity : AppCompatActivity(), PttService.UiListener {
             .setTitle("Options")
             .setItems(items) { _, which ->
                 when (which) {
-                    0 -> showModeDialog()
-                    1 -> {
+                    0 -> {
+                        connDetail = "RECONNECT"
+                        updateStatus()
+                        pushChannelToService()
+                        Toast.makeText(this, "Reconnecting…", Toast.LENGTH_SHORT).show()
+                    }
+                    1 -> showModeDialog()
+                    2 -> {
                         busy = !busy
                         service?.setChannelBusy(busy)
                     }
-                    2 -> service?.replayRx(REMOTE_ID)
-                    3 -> showAddChannelDialog()
-                    4 -> {
+                    3 -> service?.replayRx(REMOTE_ID)
+                    4 -> showAddChannelDialog()
+                    5 -> {
                         store.signOut()
                         showLogin()
                     }

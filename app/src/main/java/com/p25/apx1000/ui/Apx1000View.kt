@@ -62,6 +62,10 @@ class Apx1000View @JvmOverloads constructor(
     var statusText: String = "READY"
         set(v) { field = v; invalidate() }
 
+    /** Small build/version marker drawn in the corner for on-device confirmation. */
+    var buildTag: String = ""
+        set(v) { field = v; invalidate() }
+
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         typeface = BOLD
@@ -268,6 +272,12 @@ class Apx1000View @JvmOverloads constructor(
             textPaint.color = if (light == Light.INHIBIT) RED else GREEN_DARK
             val idLine = "ID : $speaker"
             canvas.drawText(idLine, screenRect.centerX() - textPaint.measureText(idLine) / 2f, screenRect.top + 194f, textPaint)
+        }
+
+        if (buildTag.isNotEmpty()) {
+            textPaint.textSize = 13f
+            textPaint.color = withAlpha(TEXT, 0x88)
+            canvas.drawText(buildTag, screenRect.left + 8f, screenRect.bottom - 54f, textPaint)
         }
     }
 
