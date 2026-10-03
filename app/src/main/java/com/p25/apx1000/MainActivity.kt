@@ -33,6 +33,15 @@ import com.p25.apx1000.data.Channel
 import com.p25.apx1000.data.UserStore
 import com.p25.apx1000.databinding.ActivityMainBinding
 import com.p25.apx1000.service.PttService
+import okhttp3.Call
+import okhttp3.Callback
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.Response
+import okhttp3.WebSocket
+import okhttp3.WebSocketListener
+import java.io.IOException
+import java.util.concurrent.TimeUnit
 
 class MainActivity : AppCompatActivity(), PttService.UiListener {
 
@@ -199,6 +208,8 @@ class MainActivity : AppCompatActivity(), PttService.UiListener {
                 updateStatus()
             }
         }, 2500)
+        // One independent connectivity check so a blocked WebSocket is obvious.
+        handler.postDelayed({ runSelfTest() }, 1200)
     }
 
     /** HT (small) hides the touch PTT pad; phones show skin + large touch PTT. */
@@ -379,6 +390,53 @@ class MainActivity : AppCompatActivity(), PttService.UiListener {
         binding.radioDisplay.statusText = if (busy) "BUSY" else connDetail
     }
 
+    // ---- Self-test (independent of the PTT service) ---------------------
+
+    private val selfTestClient: OkHttpClient by lazy {
+        OkHttpClient.Builder()
+            .connectTimeout(8, TimeUnit.SECONDS)
+            .readTimeout(8, TimeUnit.SECONDS)
+            .build()
+    }
+
+    private fun report(msg: String) {
+        runOnUiThread {
+            Toast.makeText(this, "Self-test: $msg", Toast.LENGTH_LONG).show()
+            connDetail = msg
+            updateStatus()
+        }
+    }
+
+    /** Can we do HTTPS? And can we open a WebSocket to the same origin? */
+    private fun runSelfTest() {
+        report("checking…")
+        selfTestClient.newCall(Request.Builder().url(BuildConfig.P25_API_URL + "/api/health").build())
+            .enqueue(object : Callback {
+                override fun onFailure(call: Call, e: IOException) {
+                    report("HTTP FAIL ${e.javaClass.simpleName}")
+                }
+
+                override fun onResponse(call: Call, response: Response) {
+                    response.close()
+                    testWs()
+                }
+            })
+    }
+
+    private fun testWs() {
+        val req = Request.Builder().url(BuildConfig.P25_WS_URL).build()
+        selfTestClient.newWebSocket(req, object : WebSocketListener() {
+            override fun onOpen(webSocket: WebSocket, response: Response) {
+                webSocket.close(1000, "selftest")
+                report("HTTP OK · WS OK")
+            }
+
+            override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                report("HTTP OK · WS FAIL ${t.javaClass.simpleName}")
+            }
+        })
+    }
+
     // ---- Hardware keys (works with no touch screen) ---------------------
 
     /**
@@ -416,6 +474,7 @@ class MainActivity : AppCompatActivity(), PttService.UiListener {
 
     private fun showOptionsDialog() {
         val items = arrayOf(
+            "Self-test",
             "Reconnect",
             "Codec 2 bitrate",
             "Toggle channel busy",
@@ -427,20 +486,21 @@ class MainActivity : AppCompatActivity(), PttService.UiListener {
             .setTitle("Options")
             .setItems(items) { _, which ->
                 when (which) {
-                    0 -> {
+                    0 -> runSelfTest()
+                    1 -> {
                         connDetail = "RECONNECT"
                         updateStatus()
                         pushChannelToService()
                         Toast.makeText(this, "Reconnecting…", Toast.LENGTH_SHORT).show()
                     }
-                    1 -> showModeDialog()
-                    2 -> {
+                    2 -> showModeDialog()
+                    3 -> {
                         busy = !busy
                         service?.setChannelBusy(busy)
                     }
-                    3 -> service?.replayRx(REMOTE_ID)
-                    4 -> showAddChannelDialog()
-                    5 -> {
+                    4 -> service?.replayRx(REMOTE_ID)
+                    5 -> showAddChannelDialog()
+                    6 -> {
                         store.signOut()
                         showLogin()
                     }
