@@ -211,9 +211,18 @@ class PttEngine(context: Context, private val listener: Listener) {
         val rec = audioRecord ?: return
         val gain = SIDETONE_GAIN
 
-        // Talk Permit Tone plays as a local cue; the mic opens immediately so
-        // even short PTT presses still produce audio frames.
-        tonePlayer.playTpt()
+        // Talk Permit Tone plays first; the microphone opens only after it
+        // finishes, so the tone is not captured into the TX audio.
+        val tptMs = tonePlayer.playTpt()
+        var waited = 0L
+        while (waited < tptMs && capturing) {
+            try {
+                Thread.sleep(20)
+            } catch (_: InterruptedException) {
+                break
+            }
+            waited += 20
+        }
         if (!capturing) return
 
         val frame = enc.samplesPerFrame

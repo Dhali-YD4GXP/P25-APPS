@@ -70,8 +70,8 @@ class MainActivity : AppCompatActivity(), PttService.UiListener {
     private var currentAlias: String? = null
     private var centerDownAt = 0L
     private var dialogOpen = false
-    private var scanOriginIndex = 0
-    private var scanPaused = false
+    private var scanHomeIndex = 0
+    private var scanLocked = false
     private var scanRunnable: Runnable? = null
 
     private var codecMode = Codec2.MODE_1600
@@ -363,6 +363,8 @@ class MainActivity : AppCompatActivity(), PttService.UiListener {
         if (channels.isEmpty()) return
         channelIndex = ((channelIndex + delta) % channels.size + channels.size) % channels.size
         currentAlias = null
+        scanHomeIndex = channelIndex
+        scanLocked = false
         applyChannel()
     }
 
@@ -385,21 +387,22 @@ class MainActivity : AppCompatActivity(), PttService.UiListener {
     private fun toggleScan() {
         scanEnabled = !scanEnabled
         if (scanEnabled) {
-            scanOriginIndex = channelIndex
-            scanPaused = false
+            scanHomeIndex = channelIndex
+            scanLocked = false
             val r = object : Runnable {
                 override fun run() {
                     if (!scanEnabled) return
-                    if (!scanPaused) advanceScan()
-                    handler.postDelayed(this, 1200)
+                    if (!scanLocked && lightState != PttEngine.Light.TX) advanceScan()
+                    handler.postDelayed(this, SCAN_DWELL_MS)
                 }
             }
             scanRunnable = r
-            handler.postDelayed(r, 1200)
+            handler.postDelayed(r, SCAN_DWELL_MS)
         } else {
             scanRunnable?.let { handler.removeCallbacks(it) }
             scanRunnable = null
-            channelIndex = scanOriginIndex
+            scanLocked = false
+            channelIndex = scanHomeIndex
             currentAlias = null
             applyChannel()
         }
@@ -461,12 +464,12 @@ class MainActivity : AppCompatActivity(), PttService.UiListener {
         updateStatus()
         updateFooter()
         if (scanEnabled) {
-            if (busy && !scanPaused) {
-                scanPaused = true
-            } else if (!busy && scanPaused) {
-                // Detected channel stopped TX -> return to the origin channel.
-                scanPaused = false
-                channelIndex = scanOriginIndex
+            if (busy && !scanLocked) {
+                scanLocked = true
+            } else if (!busy && scanLocked) {
+                // Detected channel stopped TX -> return to the user's channel.
+                scanLocked = false
+                channelIndex = scanHomeIndex
                 currentAlias = null
                 applyChannel()
             }
@@ -897,5 +900,6 @@ class MainActivity : AppCompatActivity(), PttService.UiListener {
         private const val REQ_PERMISSIONS = 1001
         private const val REMOTE_ID = "1002"
         private const val SOFTKEY_COUNT = 3
+        private const val SCAN_DWELL_MS = 1600L
     }
 }
