@@ -100,12 +100,19 @@ class PttEngine(context: Context, private val listener: Listener) {
 
     private fun openAudio() {
         val frameBytes = (encoder?.samplesPerFrame ?: 160) * 2
-        if (audioRecord == null) {
+
+        val recOk = audioRecord?.state == AudioRecord.STATE_INITIALIZED
+        if (!recOk) {
+            try {
+                audioRecord?.release()
+            } catch (_: Throwable) {
+            }
+            audioRecord = null
             try {
                 val minRec = AudioRecord.getMinBufferSize(
                     SAMPLE_RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT
                 )
-                val recBuf = maxOf(minRec, frameBytes * 4)
+                val recBuf = maxOf(minRec, frameBytes * 4, 3200)
                 @Suppress("DEPRECATION")
                 audioRecord = AudioRecord(
                     MediaRecorder.AudioSource.MIC,
@@ -119,7 +126,14 @@ class PttEngine(context: Context, private val listener: Listener) {
                 listener.onError("mic unavailable")
             }
         }
-        if (audioTrack == null) {
+
+        val trkOk = audioTrack?.state == AudioTrack.STATE_INITIALIZED
+        if (!trkOk) {
+            try {
+                audioTrack?.release()
+            } catch (_: Throwable) {
+            }
+            audioTrack = null
             try {
                 val minTrk = AudioTrack.getMinBufferSize(
                     SAMPLE_RATE, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT
@@ -217,7 +231,14 @@ class PttEngine(context: Context, private val listener: Listener) {
 
         while (capturing) {
             val n = rec.read(buf, 0, frame)
-            if (n <= 0) continue
+            if (n <= 0) {
+                if (n < 0) Log.e(TAG, "AudioRecord.read error $n")
+                try {
+                    Thread.sleep(5)
+                } catch (_: InterruptedException) {
+                }
+                continue
+            }
             val bits = enc.encode(buf)
             txFrames++
             synchronized(lastTxFrames) {

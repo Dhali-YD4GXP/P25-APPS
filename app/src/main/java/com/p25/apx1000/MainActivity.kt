@@ -8,6 +8,9 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.content.ServiceConnection
 import android.content.pm.PackageManager
+import android.media.AudioFormat
+import android.media.AudioRecord
+import android.media.MediaRecorder
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.net.wifi.WifiManager
@@ -466,6 +469,42 @@ class MainActivity : AppCompatActivity(), PttService.UiListener {
         })
     }
 
+    /** Open the mic and read one frame to prove capture works. */
+    private fun testMic() {
+        report("mic test…")
+        Thread {
+            var result: String
+            try {
+                val min = AudioRecord.getMinBufferSize(
+                    8000, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT
+                )
+                val rec = AudioRecord(
+                    MediaRecorder.AudioSource.MIC, 8000,
+                    AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT,
+                    maxOf(min, 3200)
+                )
+                result = if (rec.state != AudioRecord.STATE_INITIALIZED) {
+                    "MIC FAIL state=${rec.state}"
+                } else {
+                    rec.startRecording()
+                    val buf = ShortArray(320)
+                    var n = 0
+                    for (i in 0 until 100) {
+                        n = rec.read(buf, 0, 320)
+                        if (n > 0) break
+                        Thread.sleep(20)
+                    }
+                    rec.stop()
+                    rec.release()
+                    if (n > 0) "MIC OK ($n)" else "MIC FAIL read=$n"
+                }
+            } catch (t: Throwable) {
+                result = "MIC FAIL ${t.javaClass.simpleName}"
+            }
+            report(result)
+        }.start()
+    }
+
     // ---- Hardware keys (works with no touch screen) ---------------------
 
     /**
@@ -520,6 +559,7 @@ class MainActivity : AppCompatActivity(), PttService.UiListener {
     private fun showOptionsDialog() {
         val items = arrayOf(
             "Self-test",
+            "Mic test",
             "Reconnect",
             "Learn side PTT key",
             "Toggle phone / PoC layout",
@@ -534,17 +574,18 @@ class MainActivity : AppCompatActivity(), PttService.UiListener {
             .setItems(items) { _, which ->
                 when (which) {
                     0 -> runSelfTest()
-                    1 -> {
+                    1 -> testMic()
+                    2 -> {
                         connDetail = "RECONNECT"
                         updateStatus()
                         pushChannelToService()
                         Toast.makeText(this, "Reconnecting…", Toast.LENGTH_SHORT).show()
                     }
-                    2 -> {
+                    3 -> {
                         learningPtt = true
                         Toast.makeText(this, "Press the side PTT key now…", Toast.LENGTH_LONG).show()
                     }
-                    3 -> {
+                    4 -> {
                         store.layoutMode = if (store.layoutMode == 2) 1 else 2
                         applyResponsiveLayout()
                         Toast.makeText(
@@ -553,14 +594,14 @@ class MainActivity : AppCompatActivity(), PttService.UiListener {
                             Toast.LENGTH_SHORT
                         ).show()
                     }
-                    4 -> showModeDialog()
-                    5 -> {
+                    5 -> showModeDialog()
+                    6 -> {
                         busy = !busy
                         service?.setChannelBusy(busy)
                     }
-                    6 -> service?.replayRx(REMOTE_ID)
-                    7 -> showAddChannelDialog()
-                    8 -> logout()
+                    7 -> service?.replayRx(REMOTE_ID)
+                    8 -> showAddChannelDialog()
+                    9 -> logout()
                 }
             }
             .show()
