@@ -164,11 +164,18 @@ wss.on('connection', (ws, req) => {
       const { unitId, channel } = ws.meta;
       if (!unitId || !channel) return;
       const floor = floors.get(channel);
-      if (!floor || floor.holder !== unitId) return; // only the floor holder may talk
-      const buf = Buffer.isBuffer(data) ? data : Buffer.from(data);
-      for (const c of membersOf(channel)) {
-        if (c !== ws && c.readyState === c.OPEN) c.send(buf, { binary: true });
+      if (!floor || floor.holder !== unitId) {
+        if (!ws._dropLogged) { console.log('[ws] frame dropped (no floor):', unitId); ws._dropLogged = true; }
+        return; // only the floor holder may talk
       }
+      ws._frames = (ws._frames || 0) + 1;
+      const size = Buffer.isBuffer(data) ? data.length : (data.byteLength || 0);
+      const buf = Buffer.isBuffer(data) ? data : Buffer.from(data);
+      let relayed = 0;
+      for (const c of membersOf(channel)) {
+        if (c !== ws && c.readyState === c.OPEN) { c.send(buf, { binary: true }); relayed++; }
+      }
+      if (ws._frames % 50 === 1) console.log('[ws] frames', unitId, channel, 'count=' + ws._frames, 'size=' + size, 'relayed=' + relayed);
       return;
     }
 

@@ -165,6 +165,13 @@
                     android:text="@string/action_mode" />
             </LinearLayout>
 
+            <Button
+                android:id="@+id/btnLogout"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:text="@string/action_logout" />
+
             <TextView
                 android:id="@+id/radioFooter"
                 android:layout_width="match_parent"

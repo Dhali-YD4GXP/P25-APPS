@@ -59,6 +59,8 @@ class MainActivity : AppCompatActivity(), PttService.UiListener {
     private var softkeyIndex = 0
     private var connDetail = "READY"
     private var networkLabel = "LTE"
+    private var customPttKey = -1
+    private var learningPtt = false
 
     private var codecMode = Codec2.MODE_1600
 
@@ -103,6 +105,7 @@ class MainActivity : AppCompatActivity(), PttService.UiListener {
 
         store = UserStore(this)
         channels = store.channels()
+        customPttKey = store.pttKeyCode
 
         setupLogin()
         setupRadioControls()
@@ -212,11 +215,12 @@ class MainActivity : AppCompatActivity(), PttService.UiListener {
         handler.postDelayed({ runSelfTest() }, 1200)
     }
 
-    /** HT (small) hides the touch PTT pad; phones show skin + large touch PTT. */
+    /** Device with a touch screen shows the skin + large touch PTT; PoC/HT does not. */
     private fun applyResponsiveLayout() {
+        val touch = packageManager.hasSystemFeature(PackageManager.FEATURE_TOUCHSCREEN)
         val smallestDp = resources.configuration.smallestScreenWidthDp
-        val small = smallestDp in 1 until 320
-        binding.pttPadWrap.visibility = if (small) View.GONE else View.VISIBLE
+        val showPad = touch && smallestDp >= 320
+        binding.pttPadWrap.visibility = if (showPad) View.VISIBLE else View.GONE
     }
 
     // ---- Radio controls -------------------------------------------------
@@ -245,6 +249,13 @@ class MainActivity : AppCompatActivity(), PttService.UiListener {
             service?.setChannelBusy(busy)
         }
         binding.btnMode.setOnClickListener { showModeDialog() }
+        binding.btnLogout.setOnClickListener { logout() }
+    }
+
+    private fun logout() {
+        store.signOut()
+        connDetail = "LOGGED OUT"
+        showLogin()
     }
 
     private fun showAddChannelDialog() {
@@ -444,6 +455,22 @@ class MainActivity : AppCompatActivity(), PttService.UiListener {
      * devices (e.g. Hytera PNC380 / PoC radios) regardless of focus.
      */
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        // Learn the side PTT key: capture the next key press.
+        if (learningPtt && event.action == KeyEvent.ACTION_DOWN) {
+            customPttKey = event.keyCode
+            store.pttKeyCode = event.keyCode
+            learningPtt = false
+            Toast.makeText(this, "PTT key saved: ${event.keyCode}", Toast.LENGTH_LONG).show()
+            return true
+        }
+        // Learned vendor PTT key.
+        if (customPttKey != -1 && event.keyCode == customPttKey) {
+            when (event.action) {
+                KeyEvent.ACTION_DOWN -> if (event.repeatCount == 0) service?.requestPtt()
+                KeyEvent.ACTION_UP -> service?.releasePtt()
+            }
+            return true
+        }
         if (PttService.isPttKey(event.keyCode)) {
             service?.handleKeyEvent(event)
             return true
@@ -476,11 +503,12 @@ class MainActivity : AppCompatActivity(), PttService.UiListener {
         val items = arrayOf(
             "Self-test",
             "Reconnect",
+            "Learn side PTT key",
             "Codec 2 bitrate",
             "Toggle channel busy",
             "Replay last RX",
             "Add channel",
-            "Sign out"
+            "Logout"
         )
         AlertDialog.Builder(this)
             .setTitle("Options")
@@ -493,17 +521,18 @@ class MainActivity : AppCompatActivity(), PttService.UiListener {
                         pushChannelToService()
                         Toast.makeText(this, "Reconnecting…", Toast.LENGTH_SHORT).show()
                     }
-                    2 -> showModeDialog()
-                    3 -> {
+                    2 -> {
+                        learningPtt = true
+                        Toast.makeText(this, "Press the side PTT key now…", Toast.LENGTH_LONG).show()
+                    }
+                    3 -> showModeDialog()
+                    4 -> {
                         busy = !busy
                         service?.setChannelBusy(busy)
                     }
-                    4 -> service?.replayRx(REMOTE_ID)
-                    5 -> showAddChannelDialog()
-                    6 -> {
-                        store.signOut()
-                        showLogin()
-                    }
+                    5 -> service?.replayRx(REMOTE_ID)
+                    6 -> showAddChannelDialog()
+                    7 -> logout()
                 }
             }
             .show()

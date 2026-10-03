@@ -14,6 +14,8 @@
     <string name="action_rx">RX</string>
     <string name="action_busy">Busy</string>
     <string name="action_mode">Mode</string>
+    <string name="action_logout">Logout</string>
+    <string name="action_learn_ptt">Learn side PTT key</string>
 
     <string name="notif_channel">PTT Service</string>
     <string name="notif_text">P25 radio is active</string>

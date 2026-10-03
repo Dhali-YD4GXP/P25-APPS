@@ -66,6 +66,11 @@ class UserStore(context: Context) {
     val currentUsername: String? get() = prefs.getString(KEY_SESSION_USER, null)
     val currentUnitId: String? get() = prefs.getString(KEY_SESSION_UID, null)
 
+    /** Learned side-PTT key code for this device (-1 = use defaults). */
+    var pttKeyCode: Int
+        get() = prefs.getInt(KEY_PTT, -1)
+        set(v) = prefs.edit().putInt(KEY_PTT, v).apply()
+
     fun signOut() = prefs.edit().remove(KEY_SESSION_USER).remove(KEY_SESSION_UID).apply()
 
     private fun accounts(): List<Account> {
@@ -131,5 +136,6 @@ class UserStore(context: Context) {
         private const val KEY_CHANNELS = "channels"
         private const val KEY_SESSION_USER = "session_user"
         private const val KEY_SESSION_UID = "session_uid"
+        private const val KEY_PTT = "ptt_keycode"
     }
 }

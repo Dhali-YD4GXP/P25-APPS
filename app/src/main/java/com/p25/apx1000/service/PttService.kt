@@ -226,7 +226,9 @@ class PttService : Service(), PttEngine.Listener {
             }
         }
 
-        override fun onSpeaker(unitId: String?) = postToUi { it.onSpeaker(unitId) }
+        override fun onSpeaker(unitId: String?) {
+            if (unitId.isNullOrEmpty()) engine?.stopRxPlayback() else engine?.setRemoteSpeaker(unitId)
+        }
 
         override fun onRemoteFrame(frame: ByteArray) {
             engine?.decodeAndPlay(frame)

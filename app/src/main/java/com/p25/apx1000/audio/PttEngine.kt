@@ -97,34 +97,43 @@ class PttEngine(context: Context, private val listener: Listener) {
     private fun openAudio() {
         val frameBytes = (encoder?.samplesPerFrame ?: 160) * 2
         if (audioRecord == null) {
-            val minRec = AudioRecord.getMinBufferSize(
-                SAMPLE_RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT
-            )
-            val recBuf = maxOf(minRec, frameBytes * 4)
-            @Suppress("DEPRECATION")
-            audioRecord = AudioRecord(
-                MediaRecorder.AudioSource.VOICE_COMMUNICATION,
-                SAMPLE_RATE,
-                AudioFormat.CHANNEL_IN_MONO,
-                AudioFormat.ENCODING_PCM_16BIT,
-                recBuf
-            )
+            try {
+                val minRec = AudioRecord.getMinBufferSize(
+                    SAMPLE_RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT
+                )
+                val recBuf = maxOf(minRec, frameBytes * 4)
+                @Suppress("DEPRECATION")
+                audioRecord = AudioRecord(
+                    MediaRecorder.AudioSource.VOICE_COMMUNICATION,
+                    SAMPLE_RATE,
+                    AudioFormat.CHANNEL_IN_MONO,
+                    AudioFormat.ENCODING_PCM_16BIT,
+                    recBuf
+                )
+            } catch (t: Throwable) {
+                Log.e(TAG, "AudioRecord init failed", t)
+                listener.onError("mic unavailable")
+            }
         }
         if (audioTrack == null) {
-            val minTrk = AudioTrack.getMinBufferSize(
-                SAMPLE_RATE, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT
-            )
-            val trkBuf = maxOf(minTrk, frameBytes * 4)
-            @Suppress("DEPRECATION")
-            audioTrack = AudioTrack(
-                AudioManager.STREAM_MUSIC,
-                SAMPLE_RATE,
-                AudioFormat.CHANNEL_OUT_MONO,
-                AudioFormat.ENCODING_PCM_16BIT,
-                trkBuf,
-                AudioTrack.MODE_STREAM
-            )
-            audioTrack?.play()
+            try {
+                val minTrk = AudioTrack.getMinBufferSize(
+                    SAMPLE_RATE, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT
+                )
+                val trkBuf = maxOf(minTrk, frameBytes * 4)
+                @Suppress("DEPRECATION")
+                audioTrack = AudioTrack(
+                    AudioManager.STREAM_MUSIC,
+                    SAMPLE_RATE,
+                    AudioFormat.CHANNEL_OUT_MONO,
+                    AudioFormat.ENCODING_PCM_16BIT,
+                    trkBuf,
+                    AudioTrack.MODE_STREAM
+                )
+                audioTrack?.play()
+            } catch (t: Throwable) {
+                Log.e(TAG, "AudioTrack init failed", t)
+            }
         }
     }
 
@@ -293,6 +302,16 @@ class PttEngine(context: Context, private val listener: Listener) {
         handler.removeCallbacks(rxTimeout)
         setLight(Light.IDLE)
         listener.onSpeaker(null)
+    }
+
+    /** Enter RX state and show the speaker identity from signalling events. */
+    @Synchronized
+    fun setRemoteSpeaker(unitId: String) {
+        rxPlaying = true
+        setLight(Light.RX)
+        listener.onSpeaker(unitId)
+        handler.removeCallbacks(rxTimeout)
+        handler.postDelayed(rxTimeout, RX_TIMEOUT_MS)
     }
 
     /** Called when floor control reports the channel as occupied. */
