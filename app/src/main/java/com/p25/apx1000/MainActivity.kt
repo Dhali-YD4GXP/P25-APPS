@@ -43,6 +43,7 @@ class MainActivity : AppCompatActivity(), PttService.UiListener {
     private var channelIndex = 0
     private var scanEnabled = false
     private var busy = false
+    private var online = false
 
     private var codecMode = Codec2.MODE_1600
 
@@ -68,6 +69,7 @@ class MainActivity : AppCompatActivity(), PttService.UiListener {
             service = local.service()
             service?.addUiListener(this@MainActivity)
             service?.setCodecMode(codecMode)
+            pushChannelToService()
             updateFooter()
         }
 
@@ -192,12 +194,12 @@ class MainActivity : AppCompatActivity(), PttService.UiListener {
             when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
                     binding.pttPad.alpha = 0.7f
-                    service?.pttDown()
+                    service?.requestPtt()
                     true
                 }
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                     binding.pttPad.alpha = 1.0f
-                    service?.pttUp()
+                    service?.releasePtt()
                     true
                 }
                 else -> false
@@ -254,7 +256,14 @@ class MainActivity : AppCompatActivity(), PttService.UiListener {
         binding.radioDisplay.zone = channel.zone
         binding.radioDisplay.channel = channel.name
         binding.radioDisplay.softkeyHighlight = if (scanEnabled) 1 else -1
+        pushChannelToService()
         updateFooter()
+    }
+
+    private fun pushChannelToService() {
+        val channel = channels.getOrNull(channelIndex) ?: return
+        val unitId = store.currentUnitId ?: return
+        service?.setChannel(unitId, channel.code)
     }
 
     private fun cycleChannel() {
@@ -275,6 +284,7 @@ class MainActivity : AppCompatActivity(), PttService.UiListener {
             append("Unit ").append(store.currentUnitId ?: "----")
             append(" · ").append(ch?.code ?: "-")
             append(" · Codec2 ").append(modeName)
+            append(if (online) " · ONLINE" else " · OFFLINE")
             append(if (busy) " · BUSY" else " · IDLE")
         }
     }
@@ -307,6 +317,12 @@ class MainActivity : AppCompatActivity(), PttService.UiListener {
     override fun onError(message: String) {
         binding.radioDisplay.statusText = "ERR"
         Toast.makeText(this, message, Toast.LENGTH_LONG).show()
+    }
+
+    override fun onConnection(connected: Boolean, detail: String) {
+        online = connected
+        binding.radioDisplay.statusText = if (connected) detail else "OFFLINE"
+        updateFooter()
     }
 
     // ---- Hardware keys --------------------------------------------------

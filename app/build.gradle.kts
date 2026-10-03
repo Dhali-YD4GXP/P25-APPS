@@ -25,6 +25,9 @@ android {
         ndk {
             abiFilters += listOf("armeabi-v7a", "arm64-v8a", "x86_64")
         }
+
+        buildConfigField("String", "P25_WS_URL", "\"wss://p25.dhali.my.id/ws\"")
+        buildConfigField("String", "P25_API_URL", "\"https://p25.dhali.my.id\"")
     }
 
     externalNativeBuild {
@@ -36,6 +39,7 @@ android {
 
     buildFeatures {
         viewBinding = true
+        buildConfig = true
     }
 
     compileOptions {
@@ -65,4 +69,5 @@ dependencies {
     implementation("androidx.constraintlayout:constraintlayout:2.1.4")
     implementation("androidx.lifecycle:lifecycle-service:2.8.4")
     implementation("androidx.media:media:1.7.0")
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
 }

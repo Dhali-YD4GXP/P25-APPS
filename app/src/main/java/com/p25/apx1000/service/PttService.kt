@@ -18,9 +18,11 @@ import android.util.Log
 import android.view.KeyEvent
 import androidx.core.app.NotificationCompat
 import android.support.v4.media.session.MediaSessionCompat
+import com.p25.apx1000.BuildConfig
 import com.p25.apx1000.MainActivity
 import com.p25.apx1000.R
 import com.p25.apx1000.audio.PttEngine
+import com.p25.apx1000.net.SignalingClient
 import java.util.concurrent.CopyOnWriteArrayList
 
 /**
@@ -37,6 +39,7 @@ class PttService : Service(), PttEngine.Listener {
         fun onSpeaker(unitId: String?)
         fun onBusy(busy: Boolean)
         fun onError(message: String)
+        fun onConnection(connected: Boolean, detail: String)
     }
 
     inner class LocalBinder : Binder() {
@@ -50,6 +53,18 @@ class PttService : Service(), PttEngine.Listener {
     private var engine: PttEngine? = null
     private var wakeLock: PowerManager.WakeLock? = null
     private var mediaSession: MediaSessionCompat? = null
+    private var signaling: SignalingClient? = null
+
+    @Volatile private var ownUnitId: String = ""
+    @Volatile private var channelCode: String = ""
+    @Volatile private var pendingTx = false
+    private val floorTimeout = Runnable {
+        if (pendingTx) {
+            pendingTx = false
+            Log.w(TAG, "floor timeout, transmitting locally")
+            engine?.beginTx()
+        }
+    }
 
     override fun onCreate() {
         super.onCreate()
@@ -58,13 +73,14 @@ class PttService : Service(), PttEngine.Listener {
         acquireWakeLock()
         setupMediaSession()
         engine = PttEngine(this, this).also { it.start() }
+        engine?.onFrameEncoded = { frame -> signaling?.sendFrame(frame) }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         startInForeground()
         when (intent?.action) {
-            ACTION_PTT_DOWN -> pttDown()
-            ACTION_PTT_UP -> pttUp()
+            ACTION_PTT_DOWN -> requestPtt()
+            ACTION_PTT_UP -> releasePtt()
             ACTION_TOGGLE_BUSY -> setChannelBusy(!busyState)
         }
         return START_STICKY
@@ -73,6 +89,8 @@ class PttService : Service(), PttEngine.Listener {
     override fun onBind(intent: Intent?): IBinder = binder
 
     override fun onDestroy() {
+        signaling?.disconnect()
+        signaling = null
         engine?.release()
         engine = null
         releaseWakeLock()
@@ -92,6 +110,29 @@ class PttService : Service(), PttEngine.Listener {
         uiListeners.remove(l)
     }
 
+    /**
+     * Request the floor and transmit. When online the server grants/denies;
+     * offline the engine transmits directly.
+     */
+    fun requestPtt() {
+        if (signaling?.isConnected == true) {
+            pendingTx = true
+            signaling?.sendPtt("down")
+            mainHandler.removeCallbacks(floorTimeout)
+            mainHandler.postDelayed(floorTimeout, FLOOR_TIMEOUT_MS)
+        } else {
+            engine?.pttDown()
+        }
+    }
+
+    fun releasePtt() {
+        pendingTx = false
+        mainHandler.removeCallbacks(floorTimeout)
+        signaling?.sendPtt("up")
+        engine?.pttUp()
+    }
+
+    // Local (offline) entry points.
     fun pttDown() = engine?.pttDown()
     fun pttUp() = engine?.pttUp()
 
@@ -103,6 +144,24 @@ class PttService : Service(), PttEngine.Listener {
         engine?.setChannelBusy(busy)
     }
 
+    /** Point the radio at a talkgroup and (re)connect signaling. */
+    fun setChannel(unitId: String, code: String) {
+        val id = unitId.trim().uppercase()
+        val ch = code.trim().uppercase()
+        ensureSignaling()
+        val sameIdentity = id == ownUnitId
+        ownUnitId = id
+        if (signaling?.isConnected == true && sameIdentity) {
+            channelCode = ch
+            signaling?.join(ch)
+        } else {
+            channelCode = ch
+            signaling?.connect(id, ch)
+        }
+    }
+
+    fun isOnline(): Boolean = signaling?.isConnected == true
+
     fun replayRx(unitId: String?) = engine?.replayRx(unitId)
 
     fun setCodecMode(mode: Int) = engine?.start(mode)
@@ -111,9 +170,61 @@ class PttService : Service(), PttEngine.Listener {
 
     fun setVisible(v: Boolean) = engine?.setVisible(v)
 
-    /** Transport hook for the future WSS uplink. */
+    /** Transport hook (overridden by the signaling client on create). */
     fun setFrameSink(sink: ((ByteArray) -> Unit)?) {
         engine?.onFrameEncoded = sink
+    }
+
+    private fun ensureSignaling() {
+        if (signaling != null) return
+        signaling = SignalingClient(BuildConfig.P25_WS_URL, signalingListener)
+    }
+
+    private val signalingListener = object : SignalingClient.Listener {
+        override fun onConnected() {
+            postToUi { it.onConnection(true, "ONLINE") }
+        }
+
+        override fun onDisconnected(reason: String) {
+            pendingTx = false
+            mainHandler.removeCallbacks(floorTimeout)
+            engine?.pttUp()
+            postToUi { it.onConnection(false, "OFFLINE") }
+        }
+
+        override fun onJoined(channelName: String) {
+            postToUi { it.onConnection(true, channelName) }
+        }
+
+        override fun onFloor(busy: Boolean, holder: String?, granted: Boolean) {
+            when {
+                granted && holder == ownUnitId -> {
+                    pendingTx = false
+                    mainHandler.removeCallbacks(floorTimeout)
+                    engine?.beginTx()
+                }
+                busy && holder != null && holder != ownUnitId -> {
+                    setChannelBusy(true)
+                    if (pendingTx) {
+                        pendingTx = false
+                        mainHandler.removeCallbacks(floorTimeout)
+                        engine?.inhibit()
+                    }
+                }
+                !busy -> {
+                    setChannelBusy(false)
+                    engine?.stopRxPlayback()
+                }
+            }
+        }
+
+        override fun onSpeaker(unitId: String?) = postToUi { it.onSpeaker(unitId) }
+
+        override fun onRemoteFrame(frame: ByteArray) {
+            engine?.decodeAndPlay(frame)
+        }
+
+        override fun onError(message: String) = postToUi { it.onError(message) }
     }
 
     // ---- PttEngine.Listener (called on worker threads) ------------------
@@ -151,8 +262,8 @@ class PttService : Service(), PttEngine.Listener {
     fun handleKeyEvent(event: KeyEvent): Boolean {
         if (!isPttKey(event.keyCode)) return false
         when (event.action) {
-            KeyEvent.ACTION_DOWN -> if (event.repeatCount == 0) pttDown()
-            KeyEvent.ACTION_UP -> pttUp()
+            KeyEvent.ACTION_DOWN -> if (event.repeatCount == 0) requestPtt()
+            KeyEvent.ACTION_UP -> releasePtt()
         }
         return true
     }
@@ -224,6 +335,7 @@ class PttService : Service(), PttEngine.Listener {
         private const val KEYCODE_VENDOR_1 = 288
         private const val KEYCODE_VENDOR_2 = 301
         private const val KEYCODE_MEDIA_RECORD = 130
+        private const val FLOOR_TIMEOUT_MS = 900L
 
         fun isPttKey(keyCode: Int): Boolean =
             keyCode == KEYCODE_PTT ||

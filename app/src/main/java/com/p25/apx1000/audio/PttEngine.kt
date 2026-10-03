@@ -121,25 +121,36 @@ class PttEngine(context: Context, private val listener: Listener) {
         }
     }
 
-    /** Begin a transmission. Safe to call from any thread. */
-    fun pttDown() {
+    /** Begin a transmission unconditionally (floor already granted). */
+    fun beginTx() {
         if (capturing) return
-        if (channelBusy) {
-            setLight(Light.INHIBIT)
-            listener.onBusy(true)
-            tonePlayer.playInhibit()
-            Thread {
-                Thread.sleep(INHIBIT_RESET_MS)
-                if (!capturing && (!channelBusy || visible)) {
-                    listener.onBusy(false)
-                    setLight(Light.IDLE)
-                }
-            }.start()
-            return
-        }
         capturing = true
         setLight(Light.TX)
         Thread(Runnable { captureLoop() }, "ptt-tx").start()
+    }
+
+    /** Play the talk-inhibit tone and show the red BUSY backlight. */
+    fun inhibit() {
+        setLight(Light.INHIBIT)
+        listener.onBusy(true)
+        tonePlayer.playInhibit()
+        Thread {
+            Thread.sleep(INHIBIT_RESET_MS)
+            if (!capturing && (!channelBusy || visible)) {
+                setLight(Light.IDLE)
+                if (!channelBusy) listener.onBusy(false)
+            }
+        }.start()
+    }
+
+    /** Local (offline) PTT: check busy then transmit. Safe from any thread. */
+    fun pttDown() {
+        if (capturing) return
+        if (channelBusy) {
+            inhibit()
+            return
+        }
+        beginTx()
     }
 
     /** End a transmission. Safe to call from any thread. */
@@ -258,7 +269,6 @@ class PttEngine(context: Context, private val listener: Listener) {
     fun setChannelBusy(busy: Boolean) {
         channelBusy = busy
         listener.onBusy(busy)
-        if (busy && !capturing) setLight(Light.INHIBIT) else if (!capturing) setLight(Light.IDLE)
     }
 
     fun setVisible(v: Boolean) {

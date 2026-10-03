@@ -133,10 +133,30 @@ Networks → Tunnels →** that tunnel → **Public Hostname → Add**:
 WebSocket (`wss://p25.dhali.my.id/ws`) works over the same HTTP hostname.
 Verified live: `https://p25.dhali.my.id/api/health` → `200`.
 
+## Android ⇄ backend
+
+The app connects to `wss://p25.dhali.my.id/ws` (compiled into
+`BuildConfig.P25_WS_URL` / `P25_API_URL` in `app/build.gradle.kts`).
+
+Flow (`net/SignalingClient.kt` + `service/PttService.kt`):
+
+1. On sign-in / channel select, the Activity calls `PttService.setChannel()`,
+   which sends `hello` + `join` for the talkgroup.
+2. PTT down sends `{"type":"ptt","state":"down"}` and **waits for the server
+   floor grant** before playing TPT and opening the mic; a denial plays the
+   314 Hz inhibit tone and shows the red BUSY backlight.
+3. TX Codec 2 frames are streamed over the socket (`PttEngine.onFrameEncoded` →
+   `SignalingClient.sendFrame`).
+4. RX frames from other members go to `PttEngine.decodeAndPlay`, which shows the
+   `ID : XXXX` speaker line and the green RX backlight.
+5. `floor` messages drive the BUSY indicator; the client reconnects with
+   exponential backoff and falls back to local (offline) PTT when disconnected.
+
+Verified with an automated end-to-end check against the live domain (two
+units, floor grant/deny, binary frame relay in both directions).
+
 ## Next steps
 
-- Wire the Android `Transport` to `/ws`: hook `PttService.setFrameSink` for TX
-  and `PttEngine.decodeAndPlay` for RX, with `setChannelBusy` driven by the
-  server's `floor` messages.
-- Replace the local address-book auth with the REST endpoints.
+- Replace the local `UserStore` auth with the REST endpoints (`/api/auth/*`).
+- Persist channels server-side and sync them on login.
 
